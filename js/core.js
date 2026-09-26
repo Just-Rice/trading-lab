@@ -551,10 +551,191 @@
     return { action, why, buy, sell, risk, price: s.close[i], day: s.t[i] };
   }
 
+  /* ---------- portfolios ----------
+   * A portfolio strategy holds several funds at once and rebalances on a schedule.
+   * strat.type === 'portfolio', with:
+   *   assets: fund symbols it may hold          safe: where unused money goes ('cash' or a fund)
+   *   mode: 'fixed'    - hold fixed weights (strat.weights, in %)
+   *         'trend'    - hold each asset only while its price is above its average (filter days)
+   *         'momentum' - hold the top N assets by recent performance, if they pass the filter
+   *   rebalance: 'monthly' | 'quarterly' | 'weekly'
+   *   top, look, filter: numbers or dials, like everywhere else
+   *   lookMode: 'single' (one lookback) | 'blend' (average of 1, 3, 6 and 12-month returns)
+   *   absFilter: 'none' | 'positive' | 'beatsSafe' | 'trend'
+   *   weighting: 'equal' | 'invvol' (calmer assets get more)
+   * Decisions use each rebalance day's close; trades happen at the next day's open. */
+
+  // Line every fund up on one calendar (the first symbol's trading days).
+  function alignUniverse(seriesMap, calSym) {
+    const cal = seriesMap[calSym], syms = Object.keys(seriesMap), idx = {};
+    for (const sym of syms) {
+      const s = seriesMap[sym], map = new Int32Array(cal.n).fill(-1);
+      let j = 0;
+      for (let i = 0; i < cal.n; i++) {
+        while (j < s.n - 1 && s.t[j + 1] <= cal.t[i]) j++;
+        map[i] = s.t[j] <= cal.t[i] ? j : -1;
+      }
+      idx[sym] = map;
+    }
+    return { cal, syms, idx, series: seriesMap };
+  }
+
+  const WARM = 260; // a fund needs about a year of history before it can be ranked
+  function pfNum(strat, x, def) { const v = val(strat, x); return Number.isFinite(v) ? v : def; }
+
+  function isRebalanceDay(cal, i, freq) {
+    if (i >= cal.n - 1) return false;
+    const a = new Date(cal.t[i] * 864e5), b = new Date(cal.t[i + 1] * 864e5);
+    if (freq === 'weekly') return b.getUTCDay() < a.getUTCDay() || cal.t[i + 1] - cal.t[i] >= 7;
+    const monthEnd = a.getUTCMonth() !== b.getUTCMonth();
+    if (freq === 'quarterly') return monthEnd && a.getUTCMonth() % 3 === 2;
+    return monthEnd;
+  }
+
+  // Target weights (fractions summing to 1, 'cash' included) at the close of calendar day i.
+  function portfolioTargets(U, strat, i) {
+    const out = { cash: 0 }, info = [];
+    const safe = strat.safe && strat.safe !== 'cash' && U.idx[strat.safe] && U.idx[strat.safe][i] >= WARM ? strat.safe : 'cash';
+    const add = (sym, w) => { if (w > 0) out[sym] = (out[sym] || 0) + w; };
+    const px = (sym) => { const j = U.idx[sym][i]; return j >= 0 ? U.series[sym].close[j] : NaN; };
+    const ret = (sym, days) => { const j = U.idx[sym][i]; if (j < days) return NaN; const c = U.series[sym].close; return (c[j] / c[j - days] - 1) * 100; };
+    const lookMode = strat.lookMode || 'single', look = Math.round(pfNum(strat, strat.look, 126));
+    const momentum = (sym) => lookMode === 'blend' ? (ret(sym, 21) + ret(sym, 63) + ret(sym, 126) + ret(sym, 252)) / 4 : ret(sym, look);
+    const filterDays = Math.round(pfNum(strat, strat.filter, 200));
+    const aboveAvg = (sym) => { const s = U.series[sym], j = U.idx[sym][i]; const m = indicator(s, 'sma', [filterDays]); return j >= 0 && s.close[j] > m[j]; };
+    const vol = (sym) => { const s = U.series[sym], j = U.idx[sym][i]; let a = 0, b = 0, n = 0; for (let k = Math.max(1, j - 62); k <= j; k++) { const r = s.close[k] / s.close[k - 1] - 1; a += r; b += r * r; n++; } const m = a / n; return Math.sqrt(Math.max(1e-12, b / n - m * m)); };
+    const eligible = (strat.assets || []).filter(sym => U.idx[sym] && U.idx[sym][i] >= WARM);
+    const safeMom = safe === 'cash' ? 0 : momentum(safe);
+    const passes = (sym, score) => {
+      const f = strat.absFilter || 'none';
+      if (f === 'positive') return score > 0;
+      if (f === 'beatsSafe') return score > safeMom;
+      if (f === 'trend') return aboveAvg(sym);
+      return true;
+    };
+    const weigh = (list) => {
+      if (strat.weighting === 'invvol') { const inv = list.map(s2 => 1 / vol(s2)), tot = inv.reduce((a, b) => a + b, 0); return list.map((s2, k) => inv[k] / tot); }
+      return list.map(() => 1 / list.length);
+    };
+    if (!eligible.length) { add(safe, 1); return { weights: out, info, safe }; }
+    if (strat.mode === 'fixed') {
+      const w = strat.weights || {}, tot = eligible.reduce((a, s2) => a + (+w[s2] || 0), 0);
+      if (tot <= 0) add(safe, 1); else eligible.forEach(s2 => add(s2, (+w[s2] || 0) / tot));
+      eligible.forEach(s2 => info.push({ sym: s2, ok: true }));
+    } else if (strat.mode === 'trend') {
+      const base = strat.weights && Object.keys(strat.weights).length ? strat.weights : null;
+      const tot = base ? eligible.reduce((a, s2) => a + (+base[s2] || 0), 0) : eligible.length;
+      const invw = strat.weighting === 'invvol' ? weigh(eligible) : null;
+      eligible.forEach((s2, k) => {
+        const w0 = invw ? invw[k] : base ? (+base[s2] || 0) / tot : 1 / eligible.length;
+        const ok = aboveAvg(s2);
+        info.push({ sym: s2, ok, score: (px(s2) / indicator(U.series[s2], 'sma', [filterDays])[U.idx[s2][i]] - 1) * 100 });
+        add(ok ? s2 : safe, w0);
+      });
+    } else {
+      const top = Math.max(1, Math.round(pfNum(strat, strat.top, 3)));
+      const ranked = eligible.map(s2 => ({ sym: s2, score: momentum(s2) })).filter(x => Number.isFinite(x.score)).sort((a, b) => b.score - a.score);
+      const picks = ranked.slice(0, top), slot = 1 / top;
+      const chosen = picks.filter(x => passes(x.sym, x.score));
+      const w = chosen.length ? weigh(chosen.map(x => x.sym)) : [];
+      const invested = chosen.length * slot;
+      chosen.forEach((x, k) => add(x.sym, strat.weighting === 'invvol' ? w[k] * invested : slot));
+      add(safe, 1 - invested);
+      ranked.forEach((x, k) => info.push({ sym: x.sym, score: x.score, rank: k + 1, ok: chosen.includes(x) }));
+    }
+    return { weights: out, info, safe };
+  }
+
+  function backtestPortfolio(U, strat, opt) {
+    const cal = U.cal, from = Math.max(1, opt.from | 0), to = Math.min(cal.n - 1, opt.to == null ? cal.n - 1 : opt.to);
+    const capital = opt.capital || 10000, fee = (opt.fee || 0) / 100, slip = (opt.slip || 0) / 100, band = opt.band == null ? 0.02 : opt.band;
+    const freq = strat.rebalance || 'monthly', record = opt.record !== false;
+    const hold = {}; let cash = capital;
+    const equity = record ? new Float64Array(to - from + 1) : null, rebal = [];
+    let pending = null, peak = capital, maxDD = 0, sumR = 0, sumR2 = 0, prev = capital, days = 0, orders = 0, turnover = 0, invested = 0;
+    const price = (sym, i, k) => { const j = U.idx[sym][i]; return j >= 0 ? U.series[sym][k][j] : NaN; };
+    for (let i = from; i <= to; i++) {
+      if (pending) {
+        // value everything at today's open, then trade toward the targets: sells first, then buys
+        let E = cash; const val0 = {};
+        for (const sym in hold) { const p = price(sym, i, 'open'); val0[sym] = hold[sym] * p; E += val0[sym]; }
+        const tgt = pending.weights, syms = new Set([...Object.keys(hold), ...Object.keys(tgt)]); syms.delete('cash');
+        const buys = [];
+        for (const sym of syms) {
+          const want = (tgt[sym] || 0) * E, have = val0[sym] || 0, diff = want - have;
+          const full = !tgt[sym] || !have;
+          if (Math.abs(diff) < band * E && !full) continue;
+          if (diff < 0) {
+            const p = price(sym, i, 'open') * (1 - slip), sh = Math.min(hold[sym], -diff / price(sym, i, 'open'));
+            cash += sh * p * (1 - fee); hold[sym] -= sh; if (hold[sym] < 1e-9) delete hold[sym];
+            orders++; turnover += sh * p;
+          } else if (diff > 0) buys.push([sym, diff]);
+        }
+        const need = buys.reduce((a, [, d]) => a + d, 0), scale = need > cash ? cash / need : 1;
+        for (const [sym, d] of buys) {
+          const spend = d * scale, p = price(sym, i, 'open') * (1 + slip);
+          if (!(p > 0) || spend <= 0) continue;
+          hold[sym] = (hold[sym] || 0) + spend * (1 - fee) / p; cash -= spend;
+          orders++; turnover += spend;
+        }
+        pending = null;
+      }
+      let E = cash, risky = 0;
+      for (const sym in hold) { const v = hold[sym] * price(sym, i, 'close'); E += v; if (sym !== (strat.safe || 'cash')) risky += v; }
+      if (record) equity[i - from] = E;
+      invested += E > 0 ? risky / E : 0;
+      if (E > peak) peak = E;
+      maxDD = Math.max(maxDD, 1 - E / peak);
+      if (i > from) { const r = E / prev - 1; sumR += r; sumR2 += r * r; days++; }
+      prev = E;
+      if (i < to && (i === from || isRebalanceDay(cal, i, freq))) {
+        const t = portfolioTargets(U, strat, i);
+        pending = t;
+        if (record) rebal.push({ i, weights: t.weights, info: t.info });
+      }
+    }
+    const final = prev, years = Math.max(1 / 252, (cal.t[to] - cal.t[from]) / 365.25);
+    const mean = days ? sumR / days : 0, sd = days ? Math.sqrt(Math.max(0, sumR2 / days - mean * mean)) : 0;
+    const m = {
+      final, totalReturn: (final / capital - 1) * 100, cagr: (Math.pow(Math.max(final, 1e-9) / capital, 1 / years) - 1) * 100,
+      maxDD: maxDD * 100, sharpe: sd > 0 ? mean / sd * Math.sqrt(252) : 0, trades: orders, years,
+      exposure: invested / (to - from + 1) * 100, turnover: turnover / capital / years * 100,
+      winRate: 0, avgTrade: 0,
+    };
+    m.calmar = m.maxDD > 0 ? m.cagr / m.maxDD : m.cagr;
+    return { from, to, equity, rebal, metrics: m, holdings: hold, cash };
+  }
+
+  // What the portfolio should hold now (for the live bot): targets from the latest close.
+  function decidePortfolio(U, strat) { return portfolioTargets(U, strat, U.cal.n - 1); }
+
+  const pfDials = () => ({
+    top: { label: 'How many funds to hold', v: 3, min: 1, max: 5, step: 1, tune: true },
+    look: { label: 'Momentum lookback (days)', v: 126, min: 21, max: 252, step: 21, tune: true },
+    filter: { label: 'Trend average (days)', v: 150, min: 50, max: 300, step: 25, tune: true },
+  });
+  const pfBase = (o) => Object.assign({ type: 'portfolio', builtin: true, rebalance: 'monthly', safe: 'SHY', weighting: 'equal', lookMode: 'blend', absFilter: 'none', top: { p: 'top' }, look: { p: 'look' }, filter: { p: 'filter' }, params: pfDials() }, o);
+  const PORTFOLIOS = [
+    pfBase({ id: 'pf-balanced', name: 'Balanced: stocks, bonds and gold (researched)', mode: 'fixed', assets: ['SPY', 'TLT', 'GLD'], weights: { SPY: 50, TLT: 35, GLD: 15 },
+      desc: 'Half in the S&P 500, a third in long-term government bonds and the rest in gold, topped back up every month. In the research it had much smaller crashes than stocks alone (in 2008 it lost 10% while the S&P 500 lost 37%), but it grew more slowly and trailed the S&P 500 badly in 2021–2026, when bonds fell with stocks.' }),
+    pfBase({ id: 'pf-steady', name: 'Steady: mostly bonds (researched)', mode: 'fixed', assets: ['SPY', 'IEF', 'GLD'], weights: { SPY: 30, IEF: 60, GLD: 10 },
+      desc: 'Mostly medium-term government bonds, with some stocks and gold. The research\'s smoothest mix: small drops, but slow growth.' }),
+    pfBase({ id: 'pf-momentum', name: 'Momentum rotation', mode: 'momentum', assets: ['SPY', 'EFA', 'TLT', 'GLD'],
+      desc: 'Each month it holds the 3 of US stocks, international stocks, long-term bonds and gold that have risen most recently. It wasn\'t the research pick, but it held up best in the 2021–2026 exam, while still trailing the S&P 500.' }),
+    pfBase({ id: 'pf-trend', name: 'Trend-protected mix', mode: 'trend', assets: ['SPY', 'IEF', 'GLD'], weights: { SPY: 30, IEF: 50, GLD: 20 },
+      desc: 'A mix of stocks, bonds and gold where each part steps aside into short-term bonds while its price is below its long-term average. Very small drops, low growth.' }),
+    pfBase({ id: 'pf-6040', name: 'Classic 60/40', mode: 'fixed', assets: ['SPY', 'IEF'], weights: { SPY: 60, IEF: 40 },
+      desc: 'The traditional mix: 60% US stocks and 40% medium-term Treasury bonds, rebalanced monthly.' }),
+    pfBase({ id: 'pf-permanent', name: 'Permanent portfolio', mode: 'fixed', assets: ['SPY', 'TLT', 'GLD', 'SHY'], weights: { SPY: 25, TLT: 25, GLD: 25, SHY: 25 },
+      desc: 'A quarter each in stocks, long-term bonds, gold and short-term bonds (cash-like): built to hold up in any economy.' }),
+    pfBase({ id: 'pf-spy', name: 'S&P 500 only', mode: 'fixed', assets: ['SPY'], weights: { SPY: 100 }, desc: 'Just the S&P 500 index fund, for comparison.' }),
+  ];
+
   root.TL = {
     DAY, dayToISO, makeSeries, extendSeries, indexOnOrAfter, indicator,
     IND, CMP, RECIPES, GOALS, blankStrategy, defaultRisk, tunables, withValues, clone, val,
     describeRule, describeOperand, fmtNum, riskOf,
     backtest, buyHoldCurve, curveStats, score, paramSpace, decide,
+    alignUniverse, portfolioTargets, backtestPortfolio, decidePortfolio, isRebalanceDay, PORTFOLIOS, WARM,
   };
 })(typeof self !== 'undefined' ? self : globalThis);

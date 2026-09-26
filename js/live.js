@@ -136,18 +136,47 @@
   setInterval(refreshClock, 60000);
 
   /* ---------- 1. forward tests ---------- */
-  const fwdCharts = new Map();
+  let fwdCharts = [];
   async function renderForward() {
     const el = $('fwdList'), list = A.S.forward;
-    fwdCharts.clear();
+    fwdCharts.forEach(c => c.dispose()); fwdCharts = [];
     if (!list.length) { el.innerHTML = '<p class="hint">No forward tests yet.</p>'; renderBotMaker(); return; }
     el.innerHTML = '';
     for (const f of list) {
       const box = h('div', { class: 'fwd' });
       el.append(box);
-      try { await fillForward(box, f); } catch (e) { box.textContent = `${f.name}: ${e.message}`; }
+      try { await (f.kind === 'portfolio' ? fillForwardPortfolio(box, f) : fillForward(box, f)); } catch (e) { box.textContent = `${f.name}: ${e.message}`; }
     }
     renderBotMaker();
+  }
+  async function fillForwardPortfolio(box, f) {
+    const U = await A.loadUniverse(A.pfSyms(f.strat)), cal = U.cal;
+    const lockIdx = Math.min(cal.n - 1, TL.indexOnOrAfter(cal, f.lockedDay + 1) - 1), days = cal.n - 1 - lockIdx;
+    const from = Math.max(TL.WARM, lockIdx - 30);
+    const res = TL.backtestPortfolio(U, f.strat, { from, to: cal.n - 1, capital: f.capital, fee: f.fee, slip: f.slip });
+    const eq = res.equity, eqLock = eq[lockIdx - from], ret = (eq[cal.n - 1 - from] / eqLock - 1) * 100;
+    const spy = U.series.SPY, bh = (spy.close[U.idx.SPY[cal.n - 1]] / spy.close[U.idx.SPY[lockIdx]] - 1) * 100;
+    const now = TL.decidePortfolio(U, f.strat).weights;
+    const holds = Object.entries(now).filter(([, v]) => v > 0.0001).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k === 'cash' ? 'Cash' : k} ${(v * 100).toFixed(0)}%`).join(', ');
+    const nm = h('input', { value: f.name, 'aria-label': 'Forward test name', style: 'font-weight:700;width:min(100%,440px);padding:4px 6px' });
+    nm.onchange = () => { f.name = nm.value; A.persist(); renderBotMaker(); };
+    box.append(h('div', { class: 'fwd-head' }, nm, h('span', { class: 'muted' }, `Portfolio · locked ${fmt.date(f.lockedDay)}`)));
+    const stats = h('div', { class: 'fwd-stats' });
+    stats.innerHTML = (days ? `<div>Trading days since lock<b>${days}</b></div>
+      <div>Portfolio since lock<b class="${fmt.signClass(ret)}">${fmt.pct(ret, 2)}</b></div>
+      <div>S&amp;P 500 since lock<b class="${fmt.signClass(bh)}">${fmt.pct(bh, 2)}</b></div>` : `<div>Status<b style="font-size:14px">Waiting for the first new trading day</b></div>`) +
+      `<div style="grid-column:span 2">Holds now<b style="font-size:14px">${esc(holds)}</b></div>`;
+    box.append(stats);
+    if (days >= 2) {
+      const leg = h('div', { class: 'legend' }), ch = h('div', { class: 'chart chart-sm' });
+      box.append(leg, ch);
+      const lc = lineChart(ch, leg); fwdCharts.push(lc);
+      const a = [], b = [];
+      for (let i = lockIdx; i < cal.n; i++) { a.push({ time: T(cal.t[i]), value: eq[i - from] / eqLock * f.capital }); b.push({ time: T(cal.t[i]), value: spy.close[U.idx.SPY[i]] / spy.close[U.idx.SPY[lockIdx]] * f.capital }); }
+      lc.set([{ label: 'Portfolio', pts: a, color: '--s1' }, { label: 'S&P 500 only', pts: b, color: '--bench', dash: true }], { log: false });
+    }
+    box.append(h('div', { class: 'btns', style: 'margin-top:10px' },
+      A.confirmBtn('Remove', 'Sure?', () => { A.S.forward = A.S.forward.filter(x => x.id !== f.id); A.persist(); renderForward(); fillAlgoSelect(); }, 'btn sm danger')));
   }
   async function fillForward(box, f) {
     const s = await A.loadSeries(f.sym);
@@ -160,7 +189,7 @@
     const recent = res.trades.filter(t => t.entryIdx > lockIdx || (!t.open && t.exitIdx > lockIdx));
     const pos = res.openPos;
     const decision = TL.decide(s, f.strat, pos ? { entryIdx: pos.entryIdx, entryPrice: pos.entryPrice, peakHigh: pos.peakHigh, peakClose: pos.peakClose } : null);
-    const nm = h('input', { value: f.name, 'aria-label': 'Forward test name', style: 'font-weight:700;min-width:220px;padding:4px 6px' });
+    const nm = h('input', { value: f.name, 'aria-label': 'Forward test name', style: 'font-weight:700;width:min(100%,440px);padding:4px 6px' });
     nm.onchange = () => { f.name = nm.value; A.persist(); renderBotMaker(); };
     const plan = decision.action === 'buy' ? '<b class="up">Buy</b> at the next open' : decision.action === 'sell' ? `<b class="down">Sell</b> at the next open (${esc(decision.why)})` : pos ? 'Keep holding' : 'Stay in cash';
     box.append(h('div', { class: 'fwd-head' }, nm, h('span', { class: 'muted' }, `${f.sym} · locked ${fmt.date(f.lockedDay)}`)));
@@ -168,7 +197,7 @@
     stats.innerHTML = days ? `
       <div>Trading days since lock<b>${days}</b></div>
       <div>Robot since lock<b class="${fmt.signClass(ret)}">${fmt.pct(ret, 2)}</b></div>
-      <div>Buy &amp; hold since lock<b class="${fmt.signClass(bh)}">${fmt.pct(bh, 2)}</b></div>
+      <div>Just holding since lock<b class="${fmt.signClass(bh)}">${fmt.pct(bh, 2)}</b></div>
       <div>Trades since lock<b>${recent.length}</b></div>
       <div>Right now<b>${pos ? 'Holding' : 'In cash'}</b></div>
       <div>Next move<b style="font-size:14px">${plan}</b></div>` : `
@@ -179,13 +208,13 @@
     if (days >= 2) {
       const leg = h('div', { class: 'legend' }), ch = h('div', { class: 'chart chart-sm' });
       box.append(leg, ch);
-      const lc = lineChart(ch, leg);
+      const lc = lineChart(ch, leg); fwdCharts.push(lc);
       const robot = [], hold = [];
       for (let i = lockIdx; i < s.n; i++) {
         robot.push({ time: T(s.t[i]), value: eq[i - off] / eqLock * f.capital });
         hold.push({ time: T(s.t[i]), value: s.close[i] / s.close[lockIdx] * f.capital });
       }
-      lc.set([{ label: 'Robot', pts: robot, color: '--s1' }, { label: 'Buy & hold', pts: hold, color: '--bench', dash: true }], { log: false });
+      lc.set([{ label: 'Robot', pts: robot, color: '--s1' }, { label: 'Just holding', pts: hold, color: '--bench', dash: true }], { log: false });
     }
     if (recent.length) {
       const d = h('details', { class: 'trades' }, h('summary', {}, `Trades since lock (${recent.length})`));
@@ -233,7 +262,8 @@
   function fillAlgoSelect() {
     const sel = $('wAlgo'), cur = sel.value;
     sel.innerHTML = '';
-    if (A.S.forward.length) { const g = h('optgroup', { label: 'Forward tests (frozen settings)' }); A.S.forward.forEach(f => g.append(h('option', { value: 'f:' + f.id }, `${f.name}`))); sel.append(g); }
+    const singles = A.S.forward.filter(f => f.kind !== 'portfolio');
+    if (singles.length) { const g = h('optgroup', { label: 'Forward tests (frozen settings)' }); singles.forEach(f => g.append(h('option', { value: 'f:' + f.id }, `${f.name}`))); sel.append(g); }
     const g2 = h('optgroup', { label: 'Strategies' });
     g2.append(h('option', { value: 'e' }, `Build your own: ${A.S.edit.strat ? A.S.edit.strat.name : 'current'}`));
     A.allStrategies().forEach(s => g2.append(h('option', { value: 's:' + s.id }, s.name)));
@@ -560,6 +590,7 @@
     return { amount: +bot.allocation || 0, unit: 'pct' };
   }
   const budgetText = (bot) => { const b = budgetOf(bot); return b.unit === 'pct' ? `up to ${b.amount}% of the account` : `up to ${fmt.money(b.amount)}`; };
+  const botWhat = (x) => x.type === 'portfolio' ? `portfolio of ${x.strategy.assets.join(', ')}` : x.sym;
   function budgetField(bot) {
     const b = bot ? budgetOf(bot) : { amount: 5000, unit: 'usd' };
     const amount = h('input', { type: 'number', min: 1, step: 'any', value: b.amount, 'aria-label': 'Budget amount', style: 'width:110px' });
@@ -570,8 +601,13 @@
   // Check budgets add up, then write the settings for live/bot.json.
   async function botSettingsOut(outEl, copyEl, bots, enabled) {
     if (bots.some(x => !(x.budget > 0))) { A.toast('Every budget needs to be more than zero.'); return; }
-    const syms = bots.map(x => x.sym);
+    const pfs = bots.filter(x => x.type === 'portfolio');
+    if (pfs.length > 1) { A.toast('Use at most one portfolio bot: two portfolios would fight over the same funds.'); return; }
+    const pfFunds = pfs.length ? [...pfs[0].strategy.assets, ...(pfs[0].strategy.safe && pfs[0].strategy.safe !== 'cash' ? [pfs[0].strategy.safe] : [])] : [];
+    const syms = bots.filter(x => x.type !== 'portfolio').map(x => x.sym);
     if (new Set(syms).size !== syms.length) { A.toast('Each bot needs a different stock: two bots on one stock would fight over it.'); return; }
+    const clash = syms.find(x => pfFunds.includes(x));
+    if (clash) { A.toast(`${clash} is in both a stock bot and the portfolio bot. Pick one, so they don't fight over it.`); return; }
     const pct = bots.filter(x => x.budgetType === 'pct').reduce((t, x) => t + x.budget, 0);
     if (pct > 100) { A.toast(`The % budgets add up to ${pct}%. Keep the total at 100% or less.`); return; }
     const usd = bots.filter(x => x.budgetType === 'usd').reduce((t, x) => t + x.budget, 0);
@@ -600,7 +636,7 @@
     body.innerHTML = '';
     if (has) {
       // Change the running bot's budgets (or pause it) without starting over.
-      body.append(h('p', {}, h('b', {}, on ? 'Running: ' : 'Paused: '), cfg.bots.map(x => `${x.name} (${x.sym}, ${budgetText(x)})`).join('; ') + '.'));
+      body.append(h('p', {}, h('b', {}, on ? 'Running: ' : 'Paused: '), cfg.bots.map(x => `${x.name} (${botWhat(x)}, ${budgetText(x)})`).join('; ') + '.'));
       const box = h('details', { class: 'setup' }, h('summary', {}, 'Change budgets or pause the bot'));
       const fields = cfg.bots.map(x => ({ x, f: budgetField(x) }));
       for (const { x, f } of fields) box.append(h('div', { class: 'bot-pick' }, h('b', { style: 'flex:1' }, `${x.name}`), f.el));
@@ -634,7 +670,9 @@
     make.onclick = () => {
       const chosen = picks.filter(p => p.cb.checked);
       if (!chosen.length) { A.toast('Tick at least one forward test.'); return; }
-      botSettingsOut(out, copy, chosen.map(p => ({ name: p.f.name, sym: p.f.sym, ...p.bf.get(), strategy: p.f.strat })), true);
+      botSettingsOut(out, copy, chosen.map(p => p.f.kind === 'portfolio'
+        ? { type: 'portfolio', name: p.f.name, ...p.bf.get(), strategy: p.f.strat }
+        : { name: p.f.name, sym: p.f.sym, ...p.bf.get(), strategy: p.f.strat }), true);
     };
     el.append(h('div', { class: 'btns', style: 'margin:10px 0' }, make, copy), out);
   }

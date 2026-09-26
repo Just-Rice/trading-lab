@@ -65,7 +65,9 @@
       root.innerHTML = `
         <div class="card results">
           <div class="res-head"><h2 class="r-title">Results</h2><span class="sub r-sub"></span></div>
-          <div class="tiles r-tiles"></div>
+          <p class="summary-line r-summary"></p>
+          <div class="tiles main r-tiles"></div>
+          <details class="fold more-numbers"><summary>More numbers</summary><div class="tiles r-more"></div></details>
           <div class="replay">
             <button class="btn sm primary r-play" aria-label="Play replay">▶ Replay</button>
             <label>Speed <select class="r-speed">${SPEEDS.map(([v, l]) => `<option value="${v}"${v === 20 ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -77,16 +79,16 @@
             <label class="check"><input type="checkbox" class="r-log" checked> Log scale <span class="help-dot" title="Log scale shows percentage moves at the same size, so a 10% move in 2003 looks as big as a 10% move in 2025.">?</span></label>
             <label class="check"><input type="checkbox" class="r-candles"> Candles</label>
           </div>
-          <div class="chart-label">Price and trades</div>
+          <div class="chart-label">The price, with every buy and sell</div>
           <div class="legend r-plegend"></div>
           <div class="chart chart-lg r-pchart"></div>
-          <div class="chart-label">Money</div>
+          <div class="chart-label">Your money vs just holding</div>
           <div class="legend r-mlegend"></div>
           <div class="chart chart-sm r-mchart"></div>
-          <details class="trades"><summary class="r-tsum">Every trade</summary><div class="tbl-wrap r-trades"></div></details>
+          <details class="fold trades"><summary class="r-tsum">Every trade</summary><div class="tbl-wrap r-trades"></div></details>
         </div>`;
       const q = (c) => root.querySelector(c);
-      this.el = { title: q('.r-title'), sub: q('.r-sub'), tiles: q('.r-tiles'), play: q('.r-play'), speed: q('.r-speed'), scrub: q('.r-scrub'), read: q('.r-read'), exit: q('.r-exit'), log: q('.r-log'), candles: q('.r-candles'), plegend: q('.r-plegend'), mlegend: q('.r-mlegend'), pchart: q('.r-pchart'), mchart: q('.r-mchart'), tsum: q('.r-tsum'), trades: q('.r-trades') };
+      this.el = { title: q('.r-title'), sub: q('.r-sub'), summary: q('.r-summary'), more: q('.r-more'), tiles: q('.r-tiles'), play: q('.r-play'), speed: q('.r-speed'), scrub: q('.r-scrub'), read: q('.r-read'), exit: q('.r-exit'), log: q('.r-log'), candles: q('.r-candles'), plegend: q('.r-plegend'), mlegend: q('.r-mlegend'), pchart: q('.r-pchart'), mchart: q('.r-mchart'), tsum: q('.r-tsum'), trades: q('.r-trades') };
       this.replay = { on: false, playing: false, k: 0, raf: 0 };
       this.el.play.onclick = () => this.togglePlay();
       this.el.exit.onclick = () => this.exitReplay();
@@ -125,16 +127,22 @@
     }
 
     renderTiles() {
-      const m = this.res.metrics, b = this.bhStats, cap = this.ctx.capital;
-      const vs = (a, bb, better) => `<div class="cmp">Buy &amp; hold: ${bb}${better == null ? '' : better ? ' · <span class="up">▲ robot ahead</span>' : ' · <span class="down">▼ robot behind</span>'}</div>`;
+      const m = this.res.metrics, b = this.bhStats, cap = this.ctx.capital, sym = this.ctx.series.sym;
+      const bhFinal = cap * (1 + b.totalReturn / 100);
+      const ahead = m.final >= bhFinal;
+      this.el.summary.innerHTML = `Over ${m.years.toFixed(0)} years, this robot turned ${fmt.money(cap)} into <b class="${ahead ? 'up' : 'down'}">${fmt.money(m.final)}</b>. Just holding ${esc(sym)} would have made ${fmt.money(bhFinal)}. Its worst drop was ${fmt.pctPlain(m.maxDD, 0)} (holding: ${fmt.pctPlain(b.maxDD, 0)}).`;
+      const vs = (bb, better) => `<div class="cmp">Just holding: ${bb}${better == null ? '' : better ? ' · <span class="up">▲ robot ahead</span>' : ' · <span class="down">▼ robot behind</span>'}</div>`;
+      const tile = ([l, v, c]) => `<div class="tile"><div class="lab">${l}</div><div class="val">${v}</div>${c}</div>`;
       this.el.tiles.innerHTML = [
-        ['Final money', fmt.money(m.final), vs(null, fmt.money(cap * (1 + b.totalReturn / 100)), m.totalReturn > b.totalReturn)],
-        ['Yearly growth', fmt.pct(m.cagr), vs(null, fmt.pct(b.cagr), m.cagr > b.cagr)],
-        ['Worst drop', fmt.pctPlain(m.maxDD), vs(null, fmt.pctPlain(b.maxDD), m.maxDD < b.maxDD)],
-        ['Sharpe ratio', fmt.num(m.sharpe), vs(null, fmt.num(b.sharpe), m.sharpe > b.sharpe)],
-        ['Trades', String(m.trades), `<div class="cmp">${m.trades ? fmt.pctPlain(m.winRate, 0) + ' were winners' : 'No trades'}</div>`],
-        ['Time in the market', fmt.pctPlain(m.exposure, 0), `<div class="cmp">Avg trade ${fmt.pct(m.avgTrade)}</div>`],
-      ].map(([l, v, c]) => `<div class="tile"><div class="lab">${l}</div><div class="val">${v}</div>${c}</div>`).join('');
+        ['Money at the end', fmt.money(m.final), vs(fmt.money(bhFinal), ahead)],
+        ['Growth per year', fmt.pct(m.cagr), vs(fmt.pct(b.cagr), m.cagr > b.cagr)],
+        ['Worst drop', fmt.pctPlain(m.maxDD), vs(fmt.pctPlain(b.maxDD), m.maxDD < b.maxDD)],
+      ].map(tile).join('');
+      this.el.more.innerHTML = [
+        ['Smoothness (Sharpe ratio)', fmt.num(m.sharpe), vs(fmt.num(b.sharpe), m.sharpe > b.sharpe) + '<div class="cmp">Growth divided by how bumpy the ride was. Higher is better.</div>'],
+        ['Trades', String(m.trades), `<div class="cmp">${m.trades ? fmt.pctPlain(m.winRate, 0) + ' of them made money' : 'No trades'}</div>`],
+        ['Time in the market', fmt.pctPlain(m.exposure, 0), `<div class="cmp">Average trade ${fmt.pct(m.avgTrade)}</div>`],
+      ].map(tile).join('');
     }
 
     prepareData() {
@@ -441,6 +449,7 @@
         if (legendEl) legendEl.innerHTML = lines.map(l => `<span class="li"><i class="sw ${l.dash ? 'dash' : ''}" style="color:${css(l.color || SLOTS[l.k])}"></i>${esc(l.label)}</span>`).join('');
       },
       recolor() { lines.forEach(l => l.s.applyOptions({ color: css(l.color || SLOTS[l.k]) })); if (legendEl) api.set(lines.map(({ s, ...rest }) => rest)); },
+      dispose() { h.dispose(); },
     };
     return api;
   }

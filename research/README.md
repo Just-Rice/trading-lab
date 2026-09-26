@@ -35,3 +35,16 @@ These scripts found the **Crash shield (researched)** strategy. They run on the 
 No rule tested here reliably beat simply holding an index fund on return across all three periods. The best on offer was about the same long-run growth with smaller crashes, and it cost money in years with sudden drops that bounced straight back, such as 2011 and 2025.
 
 This research has limits. The results are past performance on a small set of funds, and none of it is financial advice.
+
+## Round two: portfolios (`pbench.js`, `p0`–`p3`)
+
+These scripts test robots that hold several funds at once, using `backtestPortfolio` in `js/core.js`. The design years start in **September 2003**, when the bond funds first had a year of history. The check years are 2015–2020, and the final exam is 2021–2026, opened once. The bar is holding the S&P 500 (SPY), with a 60/40 mix for reference.
+
+| Script | Question | Finding |
+|---|---|---|
+| `p0_sanity.js` | Does the portfolio engine match plain holding? | 100% SPY through the portfolio engine equals SPY buy & hold exactly. |
+| `p1_families.js` | Fixed mixes, trend-protected mixes or momentum rotation? | Every fixed mix of stocks, bonds and gold beat SPY on smoothness in both periods. Only 4 of 312 momentum versions did. |
+| `p2_refine.js` | Which mix, and does trend protection help? | 50/35/15 SPY/TLT/GLD ("Balanced") leads the stock-heavy mixes. 30/60/10 SPY/IEF/GLD ("Steady") has the best score. Trend protection cut drops further but cost growth. |
+| `p3_final.js` | The final exam | Every portfolio trailed SPY in 2021–2026: Balanced 6.9% a year, Steady 4.8%, SPY 15.3%. Bonds fell with stocks in 2022. Momentum (a reference, not the pick) came closest at 11.7%. |
+
+Over 2003–2026, Balanced grew 8.9% a year with a 25% worst drop, against 11.1% and 55% for SPY. Mixing assets gave a much smoother ride, but not more money.

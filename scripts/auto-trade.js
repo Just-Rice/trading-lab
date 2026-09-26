@@ -49,6 +49,58 @@ function budgetFor(bot, equity) {
   return equity * (+bot.allocation || 0) / 100;
 }
 
+// Which rebalance period a day falls in, so a portfolio bot rebalances once per period.
+function periodKey(day, freq) {
+  const d = new Date(day * 864e5), y = d.getUTCFullYear(), m = d.getUTCMonth();
+  if (freq === 'weekly') return 'W' + Math.floor((day + 3) / 7);
+  if (freq === 'quarterly') return `${y}-Q${Math.floor(m / 3) + 1}`;
+  return `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+// A portfolio bot: on the first run of each period, trade toward the target mix.
+// Only the portfolio's own funds are touched; the budget is the portfolio's size.
+async function runPortfolio(bot, c, account, state, add, today) {
+  const st = bot.strategy, base = { name: bot.name, sym: 'Portfolio' };
+  const ps = state.__portfolio || {}, key = periodKey(today, st.rebalance || 'monthly');
+  if (ps.key === key && ps.name === bot.name) { add({ ...base, action: 'wait', why: 'Already rebalanced this period.' }); return; }
+  const funds = [...new Set([...st.assets, ...(st.safe && st.safe !== 'cash' ? [st.safe] : [])])];
+  const map = {};
+  for (const sym of [...new Set(['SPY', ...funds])]) map[sym] = await prices(sym);
+  const U = TL.alignUniverse(map, 'SPY');
+  const target = TL.decidePortfolio(U, st).weights;
+  const budget = budgetFor(bot, +account.equity);
+  const positions = await c.positions(), held = {};
+  for (const p of positions || []) if (funds.includes(p.symbol)) held[p.symbol] = p;
+  const price = async (sym) => held[sym] ? +held[sym].current_price : ((await c.snapshot(sym)).latestTrade || {}).p;
+  const plan = [];
+  for (const sym of new Set([...Object.keys(target).filter(x => x !== 'cash'), ...Object.keys(held)])) {
+    const px = await price(sym);
+    if (!(px > 0)) continue;
+    const want = (target[sym] || 0) * budget, have = held[sym] ? +held[sym].market_value : 0, diff = want - have;
+    if (Math.abs(diff) < 0.02 * budget && want > 0 && have > 0) continue;
+    plan.push({ sym, px, want, have, diff });
+  }
+  let cash = +account.cash;
+  for (const p of plan.filter(x => x.diff < 0)) {
+    if (p.want <= 0) { await TLAlpaca.sellAll(c, p.sym); cash += p.have; add({ ...base, action: 'sell', qty: +held[p.sym].qty, price: p.px, why: `${p.sym} is no longer in the mix.` }); continue; }
+    const qty = Math.floor(-p.diff / p.px);
+    if (qty < 1) continue;
+    await c.submitOrder({ symbol: p.sym, qty: String(qty), side: 'sell', type: 'market', time_in_force: 'day' });
+    cash += qty * p.px;
+    add({ ...base, action: 'sell', qty, price: p.px, why: `Trim ${p.sym} back to ${((target[p.sym] || 0) * 100).toFixed(0)}% of the portfolio.` });
+  }
+  for (const p of plan.filter(x => x.diff > 0)) {
+    const qty = Math.floor(Math.min(p.diff, cash) / p.px);
+    if (qty < 1) { add({ ...base, action: 'note', note: `Wanted more ${p.sym}, but the amount is less than one share.` }); continue; }
+    await c.submitOrder({ symbol: p.sym, qty: String(qty), side: 'buy', type: 'market', time_in_force: 'day' });
+    cash -= qty * p.px;
+    add({ ...base, action: 'buy', qty, price: p.px, why: `Bring ${p.sym} up to ${((target[p.sym] || 0) * 100).toFixed(0)}% of the portfolio.` });
+  }
+  const mix = Object.entries(target).filter(([, v]) => v > 0.0001).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k === 'cash' ? 'cash' : k} ${(v * 100).toFixed(0)}%`).join(', ');
+  add({ ...base, action: 'rebalance', why: `New mix for ${key}: ${mix}.` });
+  state.__portfolio = { key, name: bot.name, weights: target, day: today };
+}
+
 async function main() {
   const cfg = readJSON('live/bot.json', { enabled: false, bots: [] });
   const log = readJSON('live/auto-log.json', []);
@@ -67,6 +119,10 @@ async function main() {
   const today = nyDay();
 
   for (const bot of cfg.bots) {
+    if (bot.type === 'portfolio') {
+      try { await runPortfolio(bot, c, account, state, add, today); } catch (e) { add({ name: bot.name, sym: 'Portfolio', action: 'error', note: e.message }); }
+      continue;
+    }
     const base = { name: bot.name, sym: bot.sym };
     try {
       const s = await prices(bot.sym);

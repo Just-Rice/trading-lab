@@ -11,12 +11,13 @@
     market: { sym: 'SPY', period: 'all', start: '', end: '', capital: 10000, fee: 0.05, slip: 0.05 },
     auto: { stratId: 'shield', strat: null, goal: 'sharpe', split: 70, budget: 1500, minTrades: 5 },
     edit: { strat: null, sourceId: 'trend' },
-    custom: [], setups: [], forward: [], tab: 'auto',
+    pf: { stratId: 'pf-balanced', strat: null },
+    custom: [], portfolios: [], setups: [], forward: [], tab: 'home',
   };
   let S;
   try { S = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { S = null; }
   S = Object.assign(TL.clone(DEFAULTS), S || {});
-  for (const k of ['market', 'auto', 'edit']) S[k] = Object.assign(TL.clone(DEFAULTS[k]), S[k] || {});
+  for (const k of ['market', 'auto', 'edit', 'pf']) S[k] = Object.assign(TL.clone(DEFAULTS[k]), S[k] || {});
   let saveTimer = 0;
   function persist() {
     clearTimeout(saveTimer);
@@ -48,6 +49,38 @@
   }
   const isoToDay = (iso) => Math.floor(Date.parse(iso + 'T00:00:00Z') / 86400000);
 
+  // Portfolios: every fund they may hold, lined up on the S&P 500's trading days.
+  const pfSyms = (st) => [...new Set(['SPY', 'IEF', ...(st.assets || []), ...(st.safe && st.safe !== 'cash' ? [st.safe] : [])])].filter(x => metaOf(x));
+  const uniCache = new Map();
+  async function loadUniverse(syms) {
+    const list = [...new Set(['SPY', ...syms])].sort(), key = list.join(',');
+    if (!uniCache.has(key)) {
+      const series = await Promise.all(list.map(loadSeries)), map = {};
+      list.forEach((x, k) => { map[x] = series[k]; });
+      uniCache.set(key, TL.alignUniverse(map, 'SPY'));
+    }
+    return uniCache.get(key);
+  }
+  // The years to test, on the portfolio calendar; start once there is a year of history.
+  // Start once every fund in the portfolio has a year of history, so early years aren't secretly all stocks.
+  function pfRange(U, st, m = S.market) {
+    const r = rangeFor(U.cal, m);
+    if (!r) return null;
+    let from = Math.max(r.from, TL.WARM);
+    for (const sym of (st && st.assets) || []) {
+      const idx = U.idx[sym]; if (!idx) continue;
+      let i = from; while (i < U.cal.n && idx[i] < TL.WARM) i++;
+      from = Math.max(from, i);
+    }
+    return r.to - from >= 60 ? { from, to: r.to } : null;
+  }
+  function pfBenchmarks(U, from, to, capital, fee, slip) {
+    const spy = { type: 'portfolio', mode: 'fixed', assets: ['SPY'], weights: { SPY: 100 }, safe: 'cash', params: {} };
+    const sixty = { type: 'portfolio', mode: 'fixed', assets: ['SPY', 'IEF'], weights: { SPY: 60, IEF: 40 }, safe: 'cash', params: {} };
+    const o = { from, to, capital, fee, slip };
+    return { spy: TL.backtestPortfolio(U, spy, o), sixty: TL.backtestPortfolio(U, sixty, o) };
+  }
+
   function rangeFor(s, m = S.market) {
     let from = 0, to = s.n - 1;
     if (m.period === 'custom') {
@@ -56,7 +89,8 @@
     } else if (m.period !== 'all') {
       from = TL.indexOnOrAfter(s, s.t[to] - Math.round(+m.period * 365.25));
     }
-    from = Math.max(1, from);
+    // Leave about a year of history first, so every rule's averages are ready on day one.
+    from = Math.max(TL.WARM, from);
     if (to - from < 60) return null;
     return { from, to };
   }
@@ -87,11 +121,16 @@
     S.tab = name; persist();
     document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.id !== 'tab-' + name));
-    $('marketBar').classList.toggle('hidden', !(name === 'auto' || name === 'custom'));
+    $('marketBar').classList.toggle('hidden', !(name === 'auto' || name === 'custom' || name === 'portfolio'));
+    $('mSymWrap').classList.toggle('hidden', name === 'portfolio');
     if (tabHooks[name]) tabHooks[name]();
     window.scrollTo({ top: 0 });
   }
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  document.addEventListener('click', (e) => {
+    const go = e.target.closest('[data-go]');
+    if (go) { e.preventDefault(); showTab(go.dataset.go); }
+  });
 
   /* ---------- market bar ---------- */
   function initMarket() {
@@ -121,8 +160,9 @@
   }
   function marketChanged() {
     autoResult = null; renderExamEmpty();
+    autoStale = true; customStale = true;
     if (S.tab === 'auto') refreshAuto(); else if (S.tab === 'custom') refreshCustom();
-    else { autoStale = true; customStale = true; }
+    document.dispatchEvent(new CustomEvent('tl-market'));
   }
   let autoStale = true, customStale = true;
 
@@ -181,7 +221,7 @@
     try {
       const x = await splitInfo();
       const strat = autoView ? autoView.strat : S.auto.strat;
-      const ctx = await context(strat, { splitIdx: x && x.splitIdx, title: autoView ? autoView.title : strat.name + ' (current dial settings)' });
+      const ctx = await context(strat, { splitIdx: x && x.splitIdx, title: autoView ? autoView.title : strat.name });
       autoRes.render(ctx);
     } catch (e) { toast(e.message); }
   }
@@ -189,8 +229,8 @@
 
   function renderExamEmpty() {
     const el = $('aExam');
-    el.className = 'card exam empty';
-    el.innerHTML = '<p class="empty-note">Press <b>Find best settings</b>. The tuner will try settings on the older years, then give the winner a "hidden exam" on the recent years it never saw.</p>';
+    el.className = 'card exam hidden';
+    el.innerHTML = '';
   }
 
   async function runTuner() {
@@ -260,11 +300,11 @@
       return `<tr><th>${label}</th><td class="${better ? 'up' : 'down'}">${fmtf(a)}</td><td>${fmtf(b)}</td></tr>`;
     };
     const col = (name, when, m, bh) => `<div class="exam-col"><h3>${name}</h3><div class="when">${when}</div>
-      <table class="kv"><thead><tr><th></th><th>Robot</th><th>Buy &amp; hold</th></tr></thead><tbody>
+      <table class="kv"><thead><tr><th></th><th>Robot</th><th>Just holding</th></tr></thead><tbody>
       ${row('Yearly growth', m.cagr, bh.cagr, fmt.pct)}
       ${row('Total return', m.totalReturn, bh.totalReturn, (x) => fmt.pct(x, 0))}
       ${row('Worst drop', m.maxDD, bh.maxDD, (x) => fmt.pctPlain(x), false)}
-      ${row('Sharpe ratio', m.sharpe, bh.sharpe, fmt.num)}
+      ${row('Smoothness (Sharpe)', m.sharpe, bh.sharpe, fmt.num)}
       <tr><th>Trades</th><td>${m.trades}</td><td class="muted">1</td></tr>
       <tr><th>Winning trades</th><td>${fmt.pctPlain(m.winRate, 0)}</td><td class="muted">–</td></tr>
       </tbody></table></div>`;
@@ -272,9 +312,9 @@
     el.innerHTML = `
       <div class="verdict ${cls}"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>
         <div><b>${title}</b><p>${text}${keep} ${beatBH} of the top ${R.top.length} settings beat buy &amp; hold in the exam.</p></div></div>
-      <p class="hint">Tried ${R.tried.toLocaleString()} ${R.grid ? '(every combination)' : `of ${R.total.toLocaleString()} possible combinations, picked at random`} in ${R.secs.toFixed(1)}s. ${Math.round(R.profitableShare * 100)}% of them made money in the tuning years. Settings shown: <b>${esc(valuesText(R.strat, best.values))}</b>${R.sel ? ` (number ${R.sel + 1} in training)` : ' (the best in training)'}.</p>
+      <p class="hint">Settings shown: <b>${esc(valuesText(R.strat, best.values))}</b>${R.sel ? ` (number ${R.sel + 1} in training)` : ' (the best in training)'}. Tried ${R.tried.toLocaleString()} ${R.grid ? '(every combination)' : `of ${R.total.toLocaleString()} possible combinations, picked at random`} in ${R.secs.toFixed(1)}s.</p>
       <div class="exam-cols">
-        ${col('Tuning years', `${fmt.date(s.t[R.x.from])} – ${fmt.date(s.t[R.x.splitIdx - 1])} · the tuner could see these`, best.train, trainBH)}
+        ${col('Learning years', `${fmt.date(s.t[R.x.from])} – ${fmt.date(s.t[R.x.splitIdx - 1])} · the tuner could see these`, best.train, trainBH)}
         ${col('Exam years', `${fmt.date(s.t[R.x.splitIdx])} – ${fmt.date(s.t[R.x.to])} · never seen while tuning`, best.test, testBH)}
       </div>
       <div class="btn-row">
@@ -283,16 +323,17 @@
         <button class="btn" data-act="save">Save setup</button>
         <button class="btn" data-act="lock">Lock in forward test</button>
       </div>
+      <details class="fold"><summary>Show every setting it tried, and the top 10</summary>
       <div class="exam-extra">
         <div><h3>Map of every setting tried</h3>
           <p class="hint" style="margin-top:0">Each square is one combination, colored by its training score. The ringed square is the winner. A broad bright area is a good sign. A single bright square among dark ones is probably luck.</p>
           <div class="heat-ctl" id="heatCtl"></div><div id="heat"></div></div>
         <div><h3>Top ${R.top.length} in training, and how each did in the exam</h3>
-          <div class="tbl-wrap"><table class="data"><thead><tr><th>#</th><th class="l">Settings</th><th>Tuning score</th><th>Exam score</th><th>Exam growth / yr</th></tr></thead><tbody>
+          <div class="tbl-wrap"><table class="data"><thead><tr><th>#</th><th class="l">Settings</th><th>Learning score</th><th>Exam score</th><th>Exam growth / yr</th></tr></thead><tbody>
           ${R.top.map((r, k) => `<tr class="pick${k === R.sel ? ' sel' : ''}" data-k="${k}"><td>${k + 1}</td><td class="l">${esc(tun.map(t => r.values[t.key]).join(' · '))}</td><td>${G.fmt(r.score)}</td><td class="${r.testScore > G.get(testBH) ? 'up' : 'down'}">${G.fmt(r.testScore)}</td><td class="${fmt.signClass(r.test.cagr)}">${fmt.pct(r.test.cagr)}</td></tr>`).join('')}
           </tbody></table></div>
-          <p class="hint">Columns in settings: ${esc(tun.map(t => t.label).join(' · '))}. Buy &amp; hold's exam score: ${G.fmt(G.get(testBH))}. Click a row to view it.</p></div>
-      </div>`;
+          <p class="hint">Columns in settings: ${esc(tun.map(t => t.label).join(' · '))}. Just holding's exam score: ${G.fmt(G.get(testBH))}. Click a row to view it.</p></div>
+      </div></details>`;
     el.querySelectorAll('tr.pick').forEach(tr => tr.onclick = () => { R.sel = +tr.dataset.k; renderExam(); viewSettings(R.top[R.sel].values, `Number ${R.sel + 1} from the tuner`); });
     el.querySelector('[data-act=use]').onclick = () => {
       for (const [k, v] of Object.entries(best.values)) if (S.auto.strat.params[k]) S.auto.strat.params[k].v = v;
@@ -450,6 +491,25 @@
     S.setups.unshift({ id: 's' + Date.now().toString(36), name: `${ctx.strat.name} on ${snap.sym}`, savedAt: new Date().toISOString(), ...snap });
     persist(); toast('Setup saved. Find it in the Saved tab.');
   }
+  function savePortfolioSetup(strat, U, r, bench) {
+    const m = r.metrics, b = bench.spy.metrics;
+    S.setups.unshift({
+      id: 's' + Date.now().toString(36), kind: 'portfolio', name: strat.name, savedAt: new Date().toISOString(), sym: 'Portfolio',
+      strat: TL.clone(strat), fromDay: U.cal.t[r.from], toDay: U.cal.t[r.to], capital: S.market.capital, fee: S.market.fee, slip: S.market.slip,
+      metrics: { cagr: m.cagr, totalReturn: m.totalReturn, maxDD: m.maxDD, sharpe: m.sharpe, trades: m.trades, winRate: 0, bhCagr: b.cagr, bhReturn: b.totalReturn },
+    });
+    persist(); toast('Setup saved. Find it in the Saved tab.');
+  }
+  async function lockForwardPortfolio(strat, capital = S.market.capital, fee = S.market.fee, slip = S.market.slip) {
+    const spy = await loadSeries('SPY'), lockedDay = spy.t[spy.n - 1];
+    S.forward.unshift({
+      id: 'f' + Date.now().toString(36), kind: 'portfolio', name: strat.name, sym: 'Portfolio', strat: TL.clone(strat),
+      lockedDay, lockedAt: new Date().toISOString(), capital, fee, slip,
+    });
+    persist();
+    toast(`Locked in. It will be scored on trading days after ${fmt.date(lockedDay)}. See Go live.`);
+    document.dispatchEvent(new CustomEvent('tl-forward'));
+  }
   function lockForward(ctx) {
     const s = ctx.series, lockedDay = s.t[s.n - 1];
     S.forward.unshift({
@@ -457,7 +517,7 @@
       lockedDay, lockedAt: new Date().toISOString(), capital: ctx.capital, fee: ctx.fee, slip: ctx.slip,
     });
     persist();
-    toast(`Locked in. It will be scored on trading days after ${fmt.date(lockedDay)}. See the Live tab.`);
+    toast(`Locked in. It will be scored on trading days after ${fmt.date(lockedDay)}. See Go live.`);
     document.dispatchEvent(new CustomEvent('tl-forward'));
   }
 
@@ -466,11 +526,11 @@
   function renderSaved() {
     const list = $('sList');
     checked = new Set([...checked].filter(id => S.setups.some(x => x.id === id)));
-    if (!S.setups.length) list.innerHTML = '<p class="hint">Nothing saved yet. Use <b>Save setup</b> in Auto-tune or Build your own.</p>';
+    if (!S.setups.length) list.innerHTML = '<p class="hint">Nothing saved yet. Use <b>Save setup</b> on the Stock bot, Portfolio bot or Build your own pages.</p>';
     else {
       const wrap = h('div', { class: 'tbl-wrap' });
       const tbl = h('table', { class: 'data' });
-      tbl.innerHTML = `<thead><tr><th class="l">Compare</th><th class="l">Name</th><th class="l">Stock</th><th class="l">Period</th><th>Yearly growth</th><th>Buy &amp; hold / yr</th><th>Worst drop</th><th>Sharpe</th><th>Trades</th><th></th></tr></thead>`;
+      tbl.innerHTML = `<thead><tr><th class="l">Compare</th><th class="l">Name</th><th class="l">What</th><th class="l">Years</th><th>Growth / yr</th><th>Just holding / yr</th><th>Worst drop</th><th>Smoothness</th><th>Trades</th><th></th></tr></thead>`;
       const tb = h('tbody');
       for (const x of S.setups) {
         const tr = h('tr', { class: 'save-row' });
@@ -480,11 +540,11 @@
         const nm = h('input', { value: x.name, 'aria-label': 'Setup name', style: 'min-width:180px;padding:4px 6px' });
         nm.onchange = () => { x.name = nm.value; persist(); renderCompare(); };
         const m = x.metrics;
-        tr.append(h('td', { class: 'l' }, cb), h('td', { class: 'l' }, nm), h('td', { class: 'l' }, x.sym), h('td', { class: 'l' }, `${fmt.year(x.fromDay)}–${fmt.year(x.toDay)}`));
+        tr.append(h('td', { class: 'l' }, cb), h('td', { class: 'l' }, nm), h('td', { class: 'l' }, x.kind === 'portfolio' ? `Portfolio of ${x.strat.assets.length}` : x.sym), h('td', { class: 'l' }, `${fmt.year(x.fromDay)}–${fmt.year(x.toDay)}`));
         tr.insertAdjacentHTML('beforeend', `<td class="${fmt.signClass(m.cagr - m.bhCagr)}">${fmt.pct(m.cagr)}</td><td>${fmt.pct(m.bhCagr)}</td><td>${fmt.pctPlain(m.maxDD)}</td><td>${fmt.num(m.sharpe)}</td><td>${m.trades}</td>`);
         const acts = h('td', {}, h('div', { class: 'btns' },
           h('button', { class: 'btn sm', onclick: () => openSetup(x) }, 'Open'),
-          h('button', { class: 'btn sm', onclick: async () => { const s = await loadSeries(x.sym); lockForward({ series: s, strat: x.strat, capital: x.capital, fee: x.fee, slip: x.slip }); } }, 'Forward test'),
+          h('button', { class: 'btn sm', onclick: async () => { if (x.kind === 'portfolio') return lockForwardPortfolio(x.strat, x.capital, x.fee, x.slip); const s = await loadSeries(x.sym); lockForward({ series: s, strat: x.strat, capital: x.capital, fee: x.fee, slip: x.slip }); } }, 'Forward test'),
           confirmBtn('Delete', 'Sure?', () => { S.setups = S.setups.filter(y => y.id !== x.id); persist(); renderSaved(); }, 'btn sm danger')));
         tr.append(acts); tb.append(tr);
       }
@@ -495,12 +555,14 @@
     renderAlgos();
   }
   function openSetup(x) {
-    Object.assign(S.market, { sym: x.sym, period: 'custom', start: TL.dayToISO(x.fromDay), end: TL.dayToISO(x.toDay), capital: x.capital, fee: x.fee, slip: x.slip });
-    $('mSym').value = x.sym; $('mPeriod').value = 'custom'; $('mStart').value = S.market.start; $('mEnd').value = S.market.end;
+    Object.assign(S.market, { sym: x.kind === 'portfolio' ? S.market.sym : x.sym, period: 'custom', start: TL.dayToISO(x.fromDay), end: TL.dayToISO(x.toDay), capital: x.capital, fee: x.fee, slip: x.slip });
+    $('mSym').value = S.market.sym; $('mPeriod').value = 'custom'; $('mStart').value = S.market.start; $('mEnd').value = S.market.end;
     $('mCapital').value = x.capital; $('mFee').value = x.fee; $('mSlip').value = x.slip;
     $('mStartWrap').classList.remove('hidden'); $('mEndWrap').classList.remove('hidden');
     const st = TL.clone(x.strat);
-    openInBuilder(st, S.custom.some(c => c.id === st.id) ? null : null);
+    persist(); autoStale = true; customStale = true;
+    if (x.kind === 'portfolio') { document.dispatchEvent(new CustomEvent('tl-open-portfolio', { detail: st })); showTab('portfolio'); return; }
+    openInBuilder(st, null);
   }
   async function renderCompare() {
     const card = $('sCompareCard');
@@ -510,6 +572,15 @@
     if (!compareChart) compareChart = lineChart($('sChart'), $('sLegend'));
     const lines = [], rows = [];
     for (const x of picks) {
+      if (x.kind === 'portfolio') {
+        const U = await loadUniverse(pfSyms(x.strat));
+        const from = Math.max(TL.WARM, TL.indexOnOrAfter(U.cal, x.fromDay)), to = Math.min(U.cal.n - 1, TL.indexOnOrAfter(U.cal, x.toDay + 1) - 1);
+        const res = TL.backtestPortfolio(U, x.strat, { from, to, capital: 10000, fee: x.fee, slip: x.slip });
+        const bh = pfBenchmarks(U, from, to, 10000, x.fee, x.slip).spy.metrics;
+        lines.push({ label: x.name, pts: Array.from(res.equity, (v, i) => ({ time: TLCharts.T(U.cal.t[from + i]), value: v })) });
+        rows.push({ x, m: { ...res.metrics, bhCagr: bh.cagr, winRate: NaN } });
+        continue;
+      }
       const s = await loadSeries(x.sym);
       const from = Math.max(1, TL.indexOnOrAfter(s, x.fromDay)), to = Math.min(s.n - 1, TL.indexOnOrAfter(s, x.toDay + 1) - 1);
       const res = TL.backtest(s, x.strat, { from, to, capital: 10000, fee: x.fee, slip: x.slip });
@@ -519,15 +590,20 @@
     compareChart.set(lines);
     const r = (label, f) => `<tr><th class="l">${label}</th>${rows.map(y => `<td>${f(y.m, y.x)}</td>`).join('')}</tr>`;
     $('sTable').innerHTML = `<div class="tbl-wrap" style="margin-top:12px"><table class="data"><thead><tr><th class="l"></th>${rows.map(y => `<th>${esc(y.x.name)}</th>`).join('')}</tr></thead><tbody>
-      ${r('Stock', (m, x) => x.sym)}${r('Period', (m, x) => `${fmt.year(x.fromDay)}–${fmt.year(x.toDay)}`)}
-      ${r('$10,000 became', m => fmt.money(m.final))}${r('Yearly growth', m => fmt.pct(m.cagr))}${r('Buy &amp; hold / yr', m => fmt.pct(m.bhCagr))}
-      ${r('Worst drop', m => fmt.pctPlain(m.maxDD))}${r('Sharpe ratio', m => fmt.num(m.sharpe))}${r('Trades', m => m.trades)}${r('Winning trades', m => fmt.pctPlain(m.winRate, 0))}
+      ${r('What', (m, x) => x.kind === 'portfolio' ? esc(x.strat.assets.join(', ')) : x.sym)}${r('Years', (m, x) => `${fmt.year(x.fromDay)}–${fmt.year(x.toDay)}`)}
+      ${r('$10,000 became', m => fmt.money(m.final))}${r('Growth per year', m => fmt.pct(m.cagr))}${r('Just holding / yr', m => fmt.pct(m.bhCagr))}
+      ${r('Worst drop', m => fmt.pctPlain(m.maxDD))}${r('Smoothness (Sharpe)', m => fmt.num(m.sharpe))}${r('Trades', m => m.trades)}
       </tbody></table></div>`;
   }
   function renderAlgos() {
     const el = $('sAlgos');
-    if (!S.custom.length) { el.innerHTML = '<p class="hint">None yet.</p>'; return; }
+    if (!S.custom.length && !S.portfolios.length) { el.innerHTML = '<p class="hint">None yet.</p>'; return; }
     el.innerHTML = '';
+    for (const c of S.portfolios) {
+      el.append(h('div', { class: 'bot-pick' }, h('b', { style: 'flex:1' }, c.name), h('span', { class: 'muted' }, `Portfolio · ${c.assets.join(', ')}`),
+        h('button', { class: 'btn sm', onclick: () => { document.dispatchEvent(new CustomEvent('tl-open-portfolio', { detail: TL.clone(c) })); showTab('portfolio'); } }, 'Open'),
+        confirmBtn('Delete', 'Sure?', () => { S.portfolios = S.portfolios.filter(x => x.id !== c.id); persist(); renderAlgos(); document.dispatchEvent(new CustomEvent('tl-strategies')); }, 'btn sm danger')));
+    }
     for (const c of S.custom) {
       const row = h('div', { class: 'bot-pick' }, h('b', { style: 'flex:1' }, c.name), h('span', { class: 'muted' }, `${Object.keys(c.params).length} dials · ${c.buy.rules.length} buy / ${c.sell.rules.length} sell rules`),
         h('button', { class: 'btn sm', onclick: () => openInBuilder(TL.clone(c), c.id) }, 'Edit'),
@@ -536,7 +612,7 @@
     }
   }
   $('sExport').onclick = () => {
-    const blob = new Blob([JSON.stringify({ app: 'trading-lab', version: 1, custom: S.custom, setups: S.setups, forward: S.forward }, null, 1)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ app: 'trading-lab', version: 2, custom: S.custom, portfolios: S.portfolios, setups: S.setups, forward: S.forward }, null, 1)], { type: 'application/json' });
     const a = h('a', { href: URL.createObjectURL(blob), download: `trading-lab-${new Date().toISOString().slice(0, 10)}.json` });
     document.body.append(a); a.click(); a.remove();
   };
@@ -545,7 +621,7 @@
     try {
       const d = JSON.parse(await f.text());
       const merge = (a, b) => { const ids = new Set(a.map(x => x.id)); return a.concat((b || []).filter(x => !ids.has(x.id))); };
-      S.custom = merge(S.custom, d.custom); S.setups = merge(S.setups, d.setups); S.forward = merge(S.forward, d.forward);
+      S.custom = merge(S.custom, d.custom); S.portfolios = merge(S.portfolios, d.portfolios); S.setups = merge(S.setups, d.setups); S.forward = merge(S.forward, d.forward);
       persist(); renderSaved(); refreshStrategyLists(); document.dispatchEvent(new CustomEvent('tl-forward'));
       toast('Imported.');
     } catch (err) { toast("That file couldn't be read."); }
@@ -566,9 +642,13 @@
     initMarket(); initAuto(); initCustom();
     window.TLApp.ready = true;
     document.dispatchEvent(new CustomEvent('tl-ready'));
-    showTab(S.tab || 'auto');
+    showTab(S.tab || 'home');
   }
 
-  window.TLApp = { S, persist, toast, loadSeries, loadRaw, metaOf, getStrategy, allStrategies, lockForward, confirmBtn, get manifest() { return manifest; }, isoToDay };
+  tabHooks.portfolio = () => document.dispatchEvent(new CustomEvent('tl-show-portfolio'));
+  window.TLApp = {
+    S, persist, toast, loadSeries, loadRaw, metaOf, getStrategy, allStrategies, lockForward, lockForwardPortfolio, savePortfolioSetup, confirmBtn,
+    loadUniverse, pfSyms, pfRange, pfBenchmarks, debounce, showTab, get manifest() { return manifest; }, isoToDay,
+  };
   boot();
 })();

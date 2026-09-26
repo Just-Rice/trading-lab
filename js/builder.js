@@ -195,7 +195,7 @@
         return h('label', { class: cls || '' }, label, i);
       };
       card.append(h('div', { class: 'dial-range' }, f('Now', 'v'), f('Lowest', 'min', 'rng'), f('Highest', 'max', 'rng'), f('Step', 'step', 'rng')));
-      if (!inUse.has(k)) card.append(h('div', { class: 'dial-count' }, 'Not used by any rule yet.'));
+      if (!inUse.has(k) && st.type !== 'portfolio') card.append(h('div', { class: 'dial-count' }, 'Not used by any rule yet.'));
       el.append(card);
     }
     const count = h('div', { class: 'dial-count' });

@@ -8,11 +8,15 @@ It's plain HTML, CSS and JavaScript, with no build step and no server. Charts us
 
 ## What's in it
 
+The site opens on a **Home** page with four plain choices. Advanced settings (fees, tuning options, detailed tables) sit behind "show more" toggles, so the defaults stay simple.
+
+
 - **Auto-tune** tries every combination of a strategy's "dials", or a random sample when there are too many. It tunes on the older years only, then gives the winner a **hidden exam** on the recent years it never saw. It also shows a map of every setting it tried and the top 10 settings.
 - **Build your own** is a rule builder. You write BUY and SELL rules from dropdown ingredients: prices, averages, highs and lows, bands, RSI, % change, volume and position details. Rules combine with ALL/ANY.
   - Any number in a rule can become a dial that the tuner is allowed to turn.
   - There are safety settings for stop-loss, take-profit, trailing stop, time limit and money per trade.
   - The built-ins are editable recipes made the same way: **Crash shield (researched)**, trend following, momentum breakout and buy the dip. The Crash shield came out of the study in [`research/`](research/). Over 2000–2026 it earned about the same as holding with much smaller crashes, but it trailed holding in 2021–2026.
+- **Portfolio bot** holds several funds at once: US and international stocks, government and corporate bonds, gold, silver, commodities, real estate and sectors. It can be a **fixed mix**, a **trend-protected mix**, or **momentum rotation** (hold the funds that have risen most). Ready-made choices include the researched Balanced and Steady mixes, momentum rotation, 60/40 and the permanent portfolio. It has the same tuner and exam as single stocks, forward tests, and daily-bot support (rebalanced on the first trading day of each month).
 - **Replay** shows the robot trading day by day, with play, pause, speed and a scrubber.
 - **Saved** keeps setups in your browser. You can compare up to five at once, and export or import everything as a file.
 - **Live** has four options:
@@ -40,9 +44,10 @@ The same engine (`js/core.js`) runs in the page, in the tuner's Web Worker and i
 | `js/tuner-worker.js` | The auto-tuner, run in the background |
 | `js/charts.js` | The results panel, replay and heatmap |
 | `js/builder.js` | The rule builder |
-| `js/app.js` | The Auto-tune, Build your own and Saved tabs |
+| `js/app.js` | Home, Stock bot, Build your own and Saved |
+| `js/portfolio.js` | The Portfolio bot tab |
 | `js/live.js`, `js/alpaca.js`, `js/finnhub.js` | The Live tab, the Alpaca paper-trading client and the Finnhub live-price client |
-| `scripts/update_data.py` | Downloads daily prices for 42 stocks and funds from Yahoo Finance into `data/` |
+| `scripts/update_data.py` | Downloads daily prices for 59 stocks and funds from Yahoo Finance into `data/` |
 | `scripts/auto-trade.js` | The automatic daily bot |
 | `research/` | The study that produced the Crash shield, with its method and results |
 | `live/bot.json` | What the daily bot trades (made in the Live tab) |
