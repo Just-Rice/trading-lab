@@ -1,0 +1,36 @@
+name: Automatic daily bot
+
+on:
+  schedule:
+    - cron: "0 15 * * 1-5"   # about 11am New York time in summer, 10am in winter
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-trade
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run the bot on the Alpaca practice account
+        env:
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: node scripts/auto-trade.js
+      - name: Save what it did
+        run: |
+          git config user.name "trading-lab-bot"
+          git config user.email "trading-lab-bot@users.noreply.github.com"
+          git add live/auto-log.json live/auto-state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Daily bot run"
+          git pull --rebase origin main
+          git push

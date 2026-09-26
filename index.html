@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trading Lab</title>
+<meta name="description" content="Build, tune and test a stock-trading robot on real US market prices, then run it live with practice money.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a1a19'/%3E%3Cpath d='M12 44l12-12 9 7 18-19' fill='none' stroke='%233987e5' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700..800&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+<script>try{const t=localStorage.getItem('tradinglab.theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Trading Lab</h1>
+    <p class="tag">Build a trading robot, tune it on real US stock prices, then test it live. <strong>Practice money only.</strong></p>
+  </div>
+  <div class="top-actions">
+    <span class="data-stamp" id="dataStamp">Loading prices…</span>
+    <button class="icon-btn" id="themeBtn" title="Switch light / dark" aria-label="Switch light or dark theme">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button role="tab" data-tab="auto" aria-selected="true">Auto-tune</button>
+  <button role="tab" data-tab="custom">Build your own</button>
+  <button role="tab" data-tab="saved">Saved</button>
+  <button role="tab" data-tab="live">Live</button>
+  <button role="tab" data-tab="guide">How it works</button>
+</nav>
+
+<main>
+  <!-- Market settings shared by Auto-tune and Build your own -->
+  <section class="market card" id="marketBar" aria-label="Market settings">
+    <label class="fld grow"><span>Stock</span><select id="mSym"></select></label>
+    <label class="fld"><span>Period</span>
+      <select id="mPeriod">
+        <option value="all">Everything (since 2000)</option>
+        <option value="20">Last 20 years</option>
+        <option value="10">Last 10 years</option>
+        <option value="5">Last 5 years</option>
+        <option value="3">Last 3 years</option>
+        <option value="custom">Custom dates…</option>
+      </select>
+    </label>
+    <label class="fld hidden" id="mStartWrap"><span>From</span><input type="date" id="mStart"></label>
+    <label class="fld hidden" id="mEndWrap"><span>To</span><input type="date" id="mEnd"></label>
+    <label class="fld sm"><span>Starting money $</span><input type="number" id="mCapital" min="100" step="100" value="10000"></label>
+    <label class="fld sm" title="Commission charged on every buy and every sell"><span>Fee per trade %</span><input type="number" id="mFee" min="0" max="5" step="0.01" value="0.05"></label>
+    <label class="fld sm" title="Slippage: how much worse than the quoted price your order fills"><span>Slippage %</span><input type="number" id="mSlip" min="0" max="5" step="0.01" value="0.05"></label>
+  </section>
+
+  <!-- AUTO-TUNE -->
+  <section class="tab-panel" id="tab-auto" role="tabpanel">
+    <div class="split">
+      <aside class="card controls">
+        <h2>1. Pick a strategy</h2>
+        <label class="fld"><span>Strategy</span><select id="aStrat"></select></label>
+        <p class="desc" id="aDesc"></p>
+        <div id="aRules" class="rules-plain"></div>
+
+        <h2>2. Choose which dials to turn</h2>
+        <p class="hint">A <b>dial</b> is a number in the strategy the tuner is allowed to change. It tries every value from low to high, in steps.</p>
+        <div id="aDials" class="dials"></div>
+
+        <h2>3. Set the exam</h2>
+        <label class="fld"><span>What counts as "best"</span><select id="aGoal"></select></label>
+        <label class="fld"><span>Tune on the first <b id="aSplitOut">70%</b> of the period, then test on the rest</span>
+          <input type="range" id="aSplit" min="40" max="90" step="5" value="70"></label>
+        <p class="hint" id="aSplitDates"></p>
+        <div class="row2">
+          <label class="fld"><span>How hard to search</span>
+            <select id="aBudget"><option value="300">Quick (300 tries)</option><option value="1500" selected>Normal (1,500)</option><option value="5000">Thorough (5,000)</option></select></label>
+          <label class="fld"><span>Ignore settings with fewer than</span>
+            <select id="aMinTrades"><option value="1">1 trade</option><option value="3">3 trades</option><option value="5" selected>5 trades</option><option value="10">10 trades</option></select></label>
+        </div>
+        <button class="btn primary big" id="aRun">Find best settings</button>
+        <div class="progress hidden" id="aProgress"><div class="bar"><i></i></div><span></span></div>
+      </aside>
+
+      <div class="results-col">
+        <div id="aExam" class="card exam empty">
+          <p class="empty-note">Press <b>Find best settings</b>. The tuner will try settings on the older years, then give the winner a "hidden exam" on the recent years it never saw.</p>
+        </div>
+        <div id="aResults"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BUILD YOUR OWN -->
+  <section class="tab-panel hidden" id="tab-custom" role="tabpanel">
+    <div class="split">
+      <aside class="card controls builder" id="builder"></aside>
+      <div class="results-col"><div id="cResults"></div></div>
+    </div>
+  </section>
+
+  <!-- SAVED -->
+  <section class="tab-panel hidden" id="tab-saved" role="tabpanel">
+    <div class="card">
+      <div class="card-head">
+        <h2>Saved setups</h2>
+        <div class="btns">
+          <button class="btn" id="sExport">Export everything</button>
+          <label class="btn">Import<input type="file" id="sImport" accept="application/json" hidden></label>
+        </div>
+      </div>
+      <p class="hint">A setup is a strategy with its exact settings, the stock and the period. Tick up to five to compare them.</p>
+      <div id="sList"></div>
+    </div>
+    <div class="card" id="sCompareCard">
+      <h2>Comparison: what $10,000 would have grown to</h2>
+      <div id="sLegend" class="legend"></div>
+      <div id="sChart" class="chart chart-md"></div>
+      <div id="sTable"></div>
+    </div>
+    <div class="card">
+      <h2>My algorithms</h2>
+      <p class="hint">Strategies you built or edited in <b>Build your own</b>. They also appear in every strategy list.</p>
+      <div id="sAlgos"></div>
+    </div>
+  </section>
+
+  <!-- LIVE -->
+  <section class="tab-panel hidden" id="tab-live" role="tabpanel">
+    <div class="live-intro card">
+      <h2>Test it against the real market</h2>
+      <p>Everything in the other tabs uses the past. Here the robot faces days that <b>haven't happened yet</b>, so it can't have memorized them. There are four ways, from simplest to most real:</p>
+      <ol class="steps-inline">
+        <li><b>Forward test</b>: lock in an algorithm today and it's scored only on the days after that. No sign-up.</li>
+        <li><b>Live watch</b>: real prices stream in during market hours and the robot decides as they move.</li>
+        <li><b>Alpaca practice account</b>: the robot places pretend orders with a real broker at real prices.</li>
+        <li><b>Automatic daily bot</b>: runs every trading day on its own, even with your laptop off.</li>
+      </ol>
+    </div>
+
+    <div class="card" id="fwdCard">
+      <div class="card-head"><h2>1. Forward tests</h2></div>
+      <p class="hint">Lock in any setup from <b>Auto-tune</b>, <b>Build your own</b> or <b>Saved</b> with the <b>Lock in forward test</b> button. Its settings are frozen at that moment. The scoreboard below updates every night with new prices.</p>
+      <div id="fwdList"></div>
+    </div>
+
+    <div class="card" id="alpacaCard">
+      <div class="card-head"><h2>Connect your Alpaca practice account</h2><span class="pill" id="alpStatus">Not connected</span></div>
+      <details id="alpHelp">
+        <summary>How to get a free Alpaca practice (paper) key, about 3 minutes</summary>
+        <ol>
+          <li>Sign up at <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener">app.alpaca.markets/signup</a>. You only need an email address for a practice-only account.</li>
+          <li>In the dashboard, make sure the switch at the top says <b>Paper</b> (practice), not Live.</li>
+          <li>On the right of the Paper home page, find <b>API Keys</b> and press <b>Generate New Keys</b>.</li>
+          <li>Copy the <b>Key ID</b> and the <b>Secret Key</b> into the boxes below. The secret is shown only once, so keep a copy somewhere safe.</li>
+        </ol>
+        <p class="hint">Your keys stay in this browser. They're sent only to Alpaca and are never put on the public site. This page only ever talks to Alpaca's <b>paper</b> (practice) address, so it can't touch real money.</p>
+      </details>
+      <div class="row3">
+        <label class="fld"><span>Key ID</span><input id="alpKey" autocomplete="off" spellcheck="false" placeholder="PK…"></label>
+        <label class="fld"><span>Secret key</span><input id="alpSecret" type="password" autocomplete="off" spellcheck="false"></label>
+        <div class="fld actions-end">
+          <label class="check"><input type="checkbox" id="alpRemember" checked> Remember on this device</label>
+          <div class="btns"><button class="btn primary" id="alpConnect">Connect</button><button class="btn" id="alpForget">Forget keys</button></div>
+        </div>
+      </div>
+      <p class="hint" id="alpMsg"></p>
+    </div>
+
+    <div class="card" id="watchCard">
+      <div class="card-head"><h2>2 &amp; 3. Live watch</h2><span class="pill" id="mktStatus">Market status unknown</span></div>
+      <div class="row3">
+        <label class="fld grow"><span>Algorithm</span><select id="wAlgo"></select></label>
+        <label class="fld"><span>Stock</span><select id="wSym"></select></label>
+        <label class="fld"><span>Orders go to</span>
+          <select id="wDest"><option value="local">Pretend account in this browser</option><option value="alpaca">My Alpaca practice account</option></select></label>
+      </div>
+      <div class="btns"><button class="btn primary" id="wStart">Start watching</button><button class="btn" id="wStop" disabled>Stop</button><button class="btn ghost" id="wReset">Reset pretend account</button></div>
+      <p class="hint">How live mode trades: the rules are checked on "today so far", treating the latest price as if it were the close. If they're met, the robot acts at the live price. It makes at most one buy and one sell per stock per day. Stop-loss, take-profit and trailing stop are checked on every price update. It only runs while this tab is open. Use the <b>automatic daily bot</b> for hands-off running.</p>
+      <div class="watch-grid hidden" id="wBody">
+        <div class="watch-main">
+          <div class="quote"><span class="q-sym" id="wQSym"></span><span class="q-px" id="wQPx">–</span><span class="q-chg" id="wQChg"></span><span class="q-time" id="wQTime"></span></div>
+          <div id="wLegend" class="legend"></div>
+          <div id="wChart" class="chart chart-md"></div>
+        </div>
+        <div class="watch-side">
+          <div class="decision" id="wDecision"></div>
+          <div id="wChecks"></div>
+          <div id="wAccount"></div>
+        </div>
+      </div>
+      <h3 class="sub">Activity</h3>
+      <ol class="log" id="wLog"></ol>
+    </div>
+
+    <div class="card" id="acctCard">
+      <div class="card-head"><h2>Alpaca practice account</h2><button class="btn" id="acctRefresh">Refresh</button></div>
+      <div id="acctBody"><p class="hint">Connect your Alpaca key above to see your practice account: money, positions and recent orders.</p></div>
+    </div>
+
+    <div class="card" id="botCard">
+      <div class="card-head"><h2>4. Automatic daily bot</h2><span class="pill" id="botStatus">Checking…</span></div>
+      <p class="hint">A scheduled GitHub job runs at about <b>11am New York time</b> every trading day. It fetches the latest prices, runs your locked-in algorithm and places orders on your Alpaca practice account. It decides on yesterday's closing prices and trades that morning, which is exactly how the backtests work. Stop-loss and take-profit are sent to Alpaca as real orders, so they trigger even between runs.</p>
+      <div id="botBody"></div>
+      <details class="setup">
+        <summary>Set it up (one time)</summary>
+        <ol>
+          <li><b>Store your keys in GitHub's locked storage.</b> Open <a href="https://github.com/Just-Rice/trading-lab/settings/secrets/actions" target="_blank" rel="noopener">the repository's secrets page</a>, press <b>New repository secret</b> and add two:
+            <code>ALPACA_KEY_ID</code> (your Key ID) and <code>ALPACA_SECRET_KEY</code> (your secret key). Nobody else can read these, not even on the public repository.</li>
+          <li><b>Choose what the bot trades.</b> Pick forward tests below and how much of the account each may use, then press <b>Make bot settings</b>.</li>
+          <li><b>Paste the settings into GitHub.</b> Press <b>Copy</b>, open <a href="https://github.com/Just-Rice/trading-lab/edit/main/live/bot.json" target="_blank" rel="noopener">live/bot.json on GitHub</a>, replace everything with what you copied, and press <b>Commit changes</b>.</li>
+          <li>Done. To try it straight away during market hours, open <a href="https://github.com/Just-Rice/trading-lab/actions/workflows/auto-trade.yml" target="_blank" rel="noopener">the bot's page on GitHub</a> and press <b>Run workflow</b>.</li>
+        </ol>
+        <div id="botMaker"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- GUIDE -->
+  <section class="tab-panel hidden guide" id="tab-guide" role="tabpanel">
+    <div class="card prose">
+      <h2>How the Trading Lab works</h2>
+      <h3>The robot</h3>
+      <p>A strategy is a set of <b>buy rules</b> and <b>sell rules</b>. Every trading day, after the market closes, the robot checks its rules against that day's prices. If the buy rules are met and it holds nothing, it buys at the <b>next morning's opening price</b>. If the sell rules are met while it holds the stock, it sells the next morning. Waiting until the next open matters: it means the robot never acts on a price it couldn't have known yet.</p>
+      <p>It trades one stock at a time, only buys (no betting on prices falling), and holds cash when it's out of the market. Cash earns nothing, to keep things simple.</p>
+      <h3>Safety settings</h3>
+      <ul>
+        <li><b>Stop-loss</b>: sell if the price falls a set % below what you paid. It triggers during the day, the moment the price touches the level.</li>
+        <li><b>Take-profit</b>: sell once the price is a set % above what you paid.</li>
+        <li><b>Trailing stop</b>: sell if the price falls a set % from its highest point since you bought. It "follows" the price up.</li>
+        <li><b>Time limit</b>: sell after a set number of trading days, no matter what.</li>
+        <li><b>Money per trade</b>: what share of your money goes into each purchase.</li>
+      </ul>
+      <h3>Costs</h3>
+      <p>Every buy and every sell pays a <b>fee</b> (commission) and <b>slippage</b>, meaning your order fills a little worse than the quoted price. Leaving these at zero makes strategies that trade a lot look far better than they would be.</p>
+      <h3>The scores</h3>
+      <ul>
+        <li><b>Yearly growth</b> (CAGR): the steady yearly rate that would turn your starting money into the final amount.</li>
+        <li><b>Worst drop</b> (maximum drawdown): the biggest fall from a high point to a low point along the way. It's how much pain you'd have had to sit through.</li>
+        <li><b>Sharpe ratio</b>: growth divided by how bumpy the ride was. Above 1 is very good for a single stock, and the S&amp;P 500 alone is usually around 0.5.</li>
+        <li><b>Return ÷ drop</b>: yearly growth divided by the worst drop.</li>
+        <li><b>Buy &amp; hold</b>: what you'd get by simply buying on day one and never selling. This is the number to beat.</li>
+      </ul>
+      <h3>Why the "hidden exam" matters</h3>
+      <p>If you try thousands of settings, some will look amazing on the past purely by luck. That's like acing a test because you saw the answer key. The fix is to split the years. The tuner may only look at the <b>older</b> part. The winner is then tested on the <b>recent</b> part it never saw. If it does about as well there, it probably found something real. If it falls apart, it memorized noise.</p>
+      <p>Signs of a trustworthy result: the exam score is close to the training score; many of the top 10 settings also pass the exam; and on the heatmap the best spot sits in a broad bright area, not a single lucky square.</p>
+      <h3>Honest limits</h3>
+      <ul>
+        <li><b>Survivorship bias</b>: the stock list is made of companies that are big and successful <i>today</i>. A strategy tested on Nvidia or Apple benefits from knowing they survived. Index funds like SPY avoid most of this.</li>
+        <li><b>Daily prices only</b>: one price per day (open, high, low, close). Nothing happens between days except stop-loss, take-profit and trailing-stop checks against the day's high and low.</li>
+        <li>Prices are adjusted for stock splits and dividends, so dividends are counted as if reinvested, for both the robot and buy &amp; hold.</li>
+        <li>Past results don't guarantee future results. This is a learning tool, not financial advice.</li>
+      </ul>
+      <h3>Where the prices come from</h3>
+      <p>Daily prices for 42 US stocks and funds are downloaded from Yahoo Finance every weeknight after the market closes, by a GitHub Action in this project's repository. Live prices come from your own Alpaca account (the IEX exchange feed, free with any Alpaca account).</p>
+      <p>Code: <a href="https://github.com/Just-Rice/trading-lab">github.com/Just-Rice/trading-lab</a></p>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="js/core.js"></script>
+<script src="js/alpaca.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/builder.js"></script>
+<script src="js/app.js"></script>
+<script src="js/live.js"></script>
+</body>
+</html>
