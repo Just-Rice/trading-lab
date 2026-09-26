@@ -17,7 +17,7 @@ It's plain HTML, CSS and JavaScript, with no build step and no server. Charts us
 - **Saved** keeps setups in your browser. You can compare up to five at once, and export or import everything as a file.
 - **Live** has four options:
   1. **Forward tests** lock an algorithm's settings and score it only on days after the lock.
-  2. **Live watch** streams real prices from your Alpaca account during market hours. The robot decides on "today so far".
+  2. **Live watch** streams real prices during market hours from a free [Finnhub](https://finnhub.io) key or your Alpaca account. The robot decides on "today so far". Keys are typed into the page and stay in the browser.
   3. **Alpaca practice account:** live watch can send its orders to your free Alpaca paper account instead of a pretend one.
   4. **Automatic daily bot:** a GitHub Action trades your locked-in algorithms on the Alpaca paper account every weekday.
 
@@ -41,7 +41,7 @@ The same engine (`js/core.js`) runs in the page, in the tuner's Web Worker and i
 | `js/charts.js` | The results panel, replay and heatmap |
 | `js/builder.js` | The rule builder |
 | `js/app.js` | The Auto-tune, Build your own and Saved tabs |
-| `js/live.js`, `js/alpaca.js` | The Live tab and the Alpaca paper-trading client |
+| `js/live.js`, `js/alpaca.js`, `js/finnhub.js` | The Live tab, the Alpaca paper-trading client and the Finnhub live-price client |
 | `scripts/update_data.py` | Downloads daily prices for 42 stocks and funds from Yahoo Finance into `data/` |
 | `scripts/auto-trade.js` | The automatic daily bot |
 | `live/bot.json` | What the daily bot trades (made in the Live tab) |

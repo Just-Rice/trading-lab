@@ -133,7 +133,7 @@
       <p>Everything in the other tabs uses the past. Here the robot faces days that <b>haven't happened yet</b>, so it can't have memorized them. There are four ways, from simplest to most real:</p>
       <ol class="steps-inline">
         <li><b>Forward test</b>: lock in an algorithm today and it's scored only on the days after that. No sign-up.</li>
-        <li><b>Live watch</b>: real prices stream in during market hours and the robot decides as they move.</li>
+        <li><b>Live watch</b>: real prices stream in during market hours and the robot decides as they move. Needs a free Finnhub or Alpaca key.</li>
         <li><b>Alpaca practice account</b>: the robot places pretend orders with a real broker at real prices.</li>
         <li><b>Automatic daily bot</b>: runs every trading day on its own, even with your laptop off.</li>
       </ol>
@@ -145,8 +145,22 @@
       <div id="fwdList"></div>
     </div>
 
+    <div class="card" id="fhCard">
+      <div class="card-head"><h2>Live prices from Finnhub</h2><span class="pill" id="fhStatus">No key yet</span></div>
+      <p class="hint">A free <a href="https://finnhub.io/register" target="_blank" rel="noopener">Finnhub</a> key gives live US stock prices for <b>Live watch</b>. After signing up, the key is on your <a href="https://finnhub.io/dashboard" target="_blank" rel="noopener">Finnhub dashboard</a>. It stays in this browser and is sent only to Finnhub, never put on the public site.</p>
+      <div class="row3">
+        <label class="fld grow"><span>Finnhub API key</span><input id="fhKey" type="password" autocomplete="off" spellcheck="false"></label>
+        <div class="fld actions-end">
+          <label class="check"><input type="checkbox" id="fhRemember" checked> Remember on this device</label>
+          <div class="btns"><button class="btn primary" id="fhSave">Connect</button><button class="btn" id="fhForget">Forget key</button></div>
+        </div>
+      </div>
+      <p class="hint" id="fhMsg"></p>
+    </div>
+
     <div class="card" id="alpacaCard">
       <div class="card-head"><h2>Connect your Alpaca practice account</h2><span class="pill" id="alpStatus">Not connected</span></div>
+      <p class="hint">Needed to send orders to a practice account and for the automatic daily bot. It can also supply live prices if you don't use Finnhub.</p>
       <details id="alpHelp">
         <summary>How to get a free Alpaca practice (paper) key, about 3 minutes</summary>
         <ol>
@@ -173,6 +187,8 @@
       <div class="row3">
         <label class="fld grow"><span>Algorithm</span><select id="wAlgo"></select></label>
         <label class="fld"><span>Stock</span><select id="wSym"></select></label>
+        <label class="fld"><span>Live prices from</span>
+          <select id="wSrc"><option value="finnhub">Finnhub</option><option value="alpaca">Alpaca</option></select></label>
         <label class="fld"><span>Orders go to</span>
           <select id="wDest"><option value="local">Pretend account in this browser</option><option value="alpaca">My Alpaca practice account</option></select></label>
       </div>
@@ -253,7 +269,7 @@
         <li>Past results don't guarantee future results. This is a learning tool, not financial advice.</li>
       </ul>
       <h3>Where the prices come from</h3>
-      <p>Daily prices for 42 US stocks and funds are downloaded from Yahoo Finance every weeknight after the market closes, by a GitHub Action in this project's repository. Live prices come from your own Alpaca account (the IEX exchange feed, free with any Alpaca account).</p>
+      <p>Daily prices for 42 US stocks and funds are downloaded from Yahoo Finance every weeknight after the market closes, by a GitHub Action in this project's repository. Live prices come from your own free Finnhub key, or from your Alpaca account (the IEX exchange feed, free with any Alpaca account).</p>
       <p>Code: <a href="https://github.com/Just-Rice/trading-lab">github.com/Just-Rice/trading-lab</a></p>
     </div>
   </section>
@@ -264,6 +280,7 @@
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="js/core.js"></script>
 <script src="js/alpaca.js"></script>
+<script src="js/finnhub.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/builder.js"></script>
 <script src="js/app.js"></script>

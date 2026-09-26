@@ -44,6 +44,7 @@
       alp = c;
       setAlpStatus(`Connected · practice account ${fmt.money(+acct.equity)}`, 'ok');
       $('alpMsg').textContent = '';
+      pickDefaultSource();
       $('alpHelp').open = false;
       refreshAccount(); refreshClock();
       return true;
@@ -68,15 +69,68 @@
     $('alpForget').onclick = () => { storeKeys(null); alp = null; $('alpKey').value = ''; $('alpSecret').value = ''; setAlpStatus('Not connected'); $('acctBody').innerHTML = '<p class="hint">Connect your Alpaca key above to see your practice account.</p>'; A.toast('Keys removed from this browser.'); };
   }
 
+  /* ---------- Finnhub key (live prices) ---------- */
+  const FKEY = 'tradinglab.finnhub';
+  let fh = null;
+  function setFhStatus(text, cls) { const p = $('fhStatus'); p.textContent = text; p.className = 'pill ' + (cls || ''); }
+  async function connectFh(key, quiet) {
+    const c = TLFinnhub.client(key);
+    $('fhMsg').textContent = quiet ? '' : 'Checking…';
+    try {
+      const q = await c.quote('SPY');
+      if (!q || !q.c) throw new Error('Finnhub returned no price');
+      fh = c;
+      setFhStatus('Connected', 'ok');
+      $('fhMsg').textContent = quiet ? '' : `Working: SPY's latest price is ${fmt.price(q.c)}.`;
+      pickDefaultSource(); refreshClock();
+      return true;
+    } catch (e) {
+      fh = null;
+      setFhStatus('Not connected', 'bad');
+      $('fhMsg').textContent = e.status === 401 || e.status === 403 ? "Finnhub didn't accept that key. Check that it was copied in full." : `Couldn't reach Finnhub: ${e.message}`;
+      return false;
+    }
+  }
+  function initFinnhub() {
+    let k = null;
+    try { k = localStorage.getItem(FKEY) || sessionStorage.getItem(FKEY); } catch (e) { /* storage blocked */ }
+    if (k) { $('fhKey').value = k; connectFh(k, true); }
+    $('fhSave').onclick = async () => {
+      const k2 = $('fhKey').value.trim();
+      if (!k2) { $('fhMsg').textContent = 'Paste your Finnhub API key first.'; return; }
+      if (await connectFh(k2)) {
+        try { localStorage.removeItem(FKEY); sessionStorage.removeItem(FKEY); ($('fhRemember').checked ? localStorage : sessionStorage).setItem(FKEY, k2); } catch (e) { /* storage blocked */ }
+        A.toast('Finnhub connected: live prices are ready.');
+      }
+    };
+    $('fhForget').onclick = () => {
+      try { localStorage.removeItem(FKEY); sessionStorage.removeItem(FKEY); } catch (e) { /* storage blocked */ }
+      fh = null; $('fhKey').value = ''; $('fhMsg').textContent = '';
+      setFhStatus('No key yet'); pickDefaultSource();
+      A.toast('Finnhub key removed from this browser.');
+    };
+  }
+  // Use Finnhub for prices when it's connected, unless the viewer picked a source themselves.
+  function pickDefaultSource() {
+    const sel = $('wSrc');
+    if (!sel.dataset.touched) sel.value = fh || !alp ? 'finnhub' : 'alpaca';
+  }
+
   /* ---------- market clock ---------- */
   let clock = null;
   async function refreshClock() {
-    if (!alp) return;
     try {
-      clock = await alp.clock();
+      if (alp) {
+        const c = await alp.clock();
+        clock = { is_open: c.is_open, next_open: c.next_open, label: c.is_open ? `Market open · closes ${until(c.next_close)}` : `Market closed · opens ${until(c.next_open)}` };
+      } else if (fh) {
+        const m = await fh.marketStatus();
+        const open = !!m.isOpen && m.session === 'regular';
+        clock = { is_open: open, label: open ? 'Market open' : m.holiday ? `Market closed · ${m.holiday}` : m.session === 'pre-market' ? 'Pre-market · opens 9:30am New York time' : m.session === 'post-market' ? 'After hours · market closed' : 'Market closed' };
+      } else return;
       const p = $('mktStatus');
       p.className = 'pill ' + (clock.is_open ? 'ok' : '');
-      p.textContent = clock.is_open ? `Market open · closes ${until(clock.next_close)}` : `Market closed · opens ${until(clock.next_open)}`;
+      p.textContent = clock.label;
     } catch (e) { /* ignore */ }
   }
   setInterval(refreshClock, 60000);
@@ -190,44 +244,83 @@
     while ($('wLog').children.length > 200) $('wLog').lastChild.remove();
   }
 
-  async function startWatch() {
-    const algo = chosenAlgo();
-    if (!algo) { A.toast('Pick an algorithm.'); return; }
-    if (!alp) { A.toast('Connect your Alpaca practice key first: live prices come from your Alpaca account.'); $('alpacaCard').scrollIntoView({ behavior: 'smooth' }); return; }
-    stopWatch(true);
-    const sym = $('wSym').value, dest = $('wDest').value;
-    const strat = TL.clone(algo.strat);
-    $('wStart').disabled = true;
-    try {
-      const hist = await A.loadSeries(sym);
-      // Fill any days between the nightly file and today with Alpaca's daily bars.
-      const lastDay = hist.t[hist.n - 1];
-      const gap = [];
+  // One shape for both price sources: latest price, today's bar and the previous close.
+  async function snapshot(src, sym) {
+    if (src === 'finnhub') {
+      const q = await fh.quote(sym);
+      if (!q || !q.t) throw new Error(`Finnhub has no price for ${sym}`);
+      const ms = q.t * 1000;
+      return { last: q.c, lastTime: ms, prevClose: q.pc, dayBar: { day: A.isoToDay(nyDate(new Date(ms))), o: q.o, h: q.h, l: q.l, c: q.c, v: 0 } };
+    }
+    const s2 = await alp.snapshot(sym), db = s2.dailyBar, lt = s2.latestTrade;
+    return {
+      last: lt ? lt.p : db && db.c, lastTime: lt ? Date.parse(lt.t) : 0, prevClose: s2.prevDailyBar ? s2.prevDailyBar.c : null,
+      dayBar: db ? { day: A.isoToDay(nyDate(new Date(db.t))), o: db.o, h: db.h, l: db.l, c: db.c, v: db.v } : null,
+    };
+  }
+  function prevWeekday(day) { let d = day - 1; while ([0, 6].includes(new Date(d * 86400000).getUTCDay())) d--; return d; }
+
+  // Days between the nightly price file and now. Alpaca has daily bars; Finnhub's free
+  // plan only has today's bar and the previous close, which covers the usual one-day gap.
+  async function gapBars(src, sym, lastDay, snap, open) {
+    const today = todayDay(), gap = [], db = snap.dayBar;
+    if (src === 'alpaca') {
       const bars = await alp.dailyBars(sym, TL.dayToISO(lastDay + 1));
-      const today = todayDay();
       for (const b of (bars && bars.bars) || []) {
         const d = A.isoToDay(b.t.slice(0, 10));
         if (d > lastDay && d < today) gap.push({ t: d, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
       }
-      const base = gap.length ? TL.extendSeries(hist, gap) : hist;
+    } else if (db && db.day > lastDay) {
+      const before = prevWeekday(db.day);
+      if (before > lastDay && snap.prevClose) gap.push({ t: before, o: snap.prevClose, h: snap.prevClose, l: snap.prevClose, c: snap.prevClose, v: 0, approx: true });
+    }
+    // A finished day that the nightly file hasn't picked up yet
+    if (db && db.day > lastDay && !(open && db.day === today) && !gap.some(g => g.t === db.day)) gap.push({ t: db.day, o: db.o, h: db.h, l: db.l, c: db.c, v: db.v || 0 });
+    return gap.sort((x, y) => x.t - y.t);
+  }
+
+  async function startWatch() {
+    const algo = chosenAlgo();
+    if (!algo) { A.toast('Pick an algorithm.'); return; }
+    const sym = $('wSym').value, dest = $('wDest').value, src = $('wSrc').value;
+    if (src === 'finnhub' && !fh) { A.toast('Add your Finnhub key first, in the box above.'); $('fhCard').scrollIntoView({ behavior: 'smooth' }); return; }
+    if (src === 'alpaca' && !alp) { A.toast('Connect your Alpaca practice key first, or choose Finnhub for live prices.'); $('alpacaCard').scrollIntoView({ behavior: 'smooth' }); return; }
+    if (dest === 'alpaca' && !alp) { A.toast('Sending orders to Alpaca needs your Alpaca practice key.'); $('alpacaCard').scrollIntoView({ behavior: 'smooth' }); return; }
+    stopWatch(true);
+    const strat = TL.clone(algo.strat);
+    $('wStart').disabled = true;
+    try {
+      const hist = await A.loadSeries(sym);
+      const lastDay = hist.t[hist.n - 1];
       await refreshClock();
-      const snap = await alp.snapshot(sym);
-      const db = snap.dailyBar, lt = snap.latestTrade;
-      const barDay = db ? A.isoToDay(nyDate(new Date(db.t))) : null;
+      const open = !!(clock && clock.is_open);
+      const snap = await snapshot(src, sym);
+      const gap = await gapBars(src, sym, lastDay, snap, open);
+      const base = gap.length ? TL.extendSeries(hist, gap) : hist;
+      const today = todayDay(), db = snap.dayBar;
       let bar = null;
-      if (clock && clock.is_open) bar = barDay === today && db ? { t: today, o: db.o, h: db.h, l: db.l, c: lt ? lt.p : db.c, v: db.v } : { t: today, o: lt.p, h: lt.p, l: lt.p, c: lt.p, v: 0 };
-      W = { sym, dest, strat, name: algo.name, base, bar, last: lt ? lt.p : base.close[base.n - 1], prevClose: base.close[base.n - 1], busy: false, stream: null, timers: [] };
+      if (open) bar = db && db.day === today
+        ? { t: today, o: db.o, h: Math.max(db.h, snap.last), l: Math.min(db.l, snap.last), c: snap.last, v: db.v }
+        : { t: today, o: snap.last, h: snap.last, l: snap.last, c: snap.last, v: 0 };
+      W = {
+        sym, dest, src, strat, name: algo.name, base, bar, last: snap.last,
+        lastTime: snap.lastTime ? new Date(snap.lastTime) : null,
+        prevClose: open ? base.close[base.n - 1] : (snap.prevClose || base.close[Math.max(0, base.n - 2)]),
+        busy: false, stream: null, timers: [],
+      };
       $('wBody').classList.remove('hidden');
       $('wQSym').textContent = sym;
       setupWatchChart();
-      log(`Started watching <b>${esc(sym)}</b> with <b>${esc(algo.name)}</b>. Orders go to ${dest === 'alpaca' ? 'your <b>Alpaca practice account</b>' : 'the <b>pretend account</b> in this browser'}.`);
-      if (!clock || !clock.is_open) log(`The market is closed, so the robot won't trade. It shows what it would do based on the latest prices. ${clock ? 'Opens ' + until(clock.next_open) + '.' : ''}`);
-      if (gap.length) log(`Filled ${gap.length} recent day${gap.length > 1 ? 's' : ''} from Alpaca that the nightly file doesn't have yet.`);
+      log(`Started watching <b>${esc(sym)}</b> with <b>${esc(algo.name)}</b>. Live prices from <b>${src === 'finnhub' ? 'Finnhub' : 'Alpaca'}</b>; orders go to ${dest === 'alpaca' ? 'your <b>Alpaca practice account</b>' : 'the <b>pretend account</b> in this browser'}.`);
+      if (!open) log(`The market is closed, so the robot won't trade. It shows what it would do based on the latest prices. ${clock && clock.next_open ? 'Opens ' + until(clock.next_open) + '.' : ''}`);
+      if (gap.length) log(`Added ${gap.length} recent day${gap.length > 1 ? 's' : ''} that the nightly price file doesn't have yet${gap.some(g => g.approx) ? ' (one of them from its closing price only)' : ''}.`);
+      if (JSON.stringify(strat).includes('"volRatio"') && src === 'finnhub') log('Note: this algorithm uses a volume rule, and Finnhub quotes don\'t include today\'s volume, so that rule may not trigger live.', 'err');
       if (dest === 'alpaca') await syncAlpacaPos();
       evaluate();
-      if (clock && clock.is_open) {
-        W.stream = TLAlpaca.stream(alp.key, alp.secret, sym, onTrade, (msg, ok) => log(esc(msg), ok ? '' : 'err'));
-        W.timers.push(setInterval(pollPrice, 8000));
+      if (open) {
+        const status = (msg, ok) => log(esc(msg), ok ? '' : 'err');
+        W.stream = src === 'finnhub' ? TLFinnhub.stream(fh.key, sym, onTrade, status) : TLAlpaca.stream(alp.key, alp.secret, sym, onTrade, status);
+        W.timers.push(setInterval(pollPrice, src === 'finnhub' ? 10000 : 8000));
       } else W.timers.push(setInterval(pollPrice, 60000));
       if (dest === 'alpaca') W.timers.push(setInterval(() => { syncAlpacaPos(); refreshAccount(); }, 20000));
       W.timers.push(setInterval(evaluate, 2000));
@@ -256,11 +349,12 @@
     W.dirty = true;
   }
   async function pollPrice() {
-    if (!W || !alp) return;
+    if (!W) return;
+    const open = !!(clock && clock.is_open);
     try {
-      const snap = await alp.snapshot(W.sym);
-      if (snap.latestTrade && (!W.lastTime || new Date(snap.latestTrade.t) > W.lastTime)) onTrade({ price: snap.latestTrade.p, time: snap.latestTrade.t });
-      if (W.bar && snap.dailyBar && A.isoToDay(nyDate(new Date(snap.dailyBar.t))) === W.bar.t) { W.bar.h = Math.max(W.bar.h, snap.dailyBar.h); W.bar.l = Math.min(W.bar.l, snap.dailyBar.l); W.bar.o = snap.dailyBar.o; }
+      const snap = await snapshot(W.src, W.sym);
+      if (open && snap.lastTime && (!W.lastTime || snap.lastTime > W.lastTime.getTime())) onTrade({ price: snap.last, time: snap.lastTime });
+      if (W.bar && snap.dayBar && snap.dayBar.day === W.bar.t) { W.bar.h = Math.max(W.bar.h, snap.dayBar.h); W.bar.l = Math.min(W.bar.l, snap.dayBar.l); W.bar.o = snap.dayBar.o; }
     } catch (e) { /* try again next time */ }
   }
 
@@ -296,7 +390,9 @@
     const chg = (W.last / W.prevClose - 1) * 100;
     $('wQPx').textContent = fmt.price(W.last);
     $('wQChg').innerHTML = `<span class="${fmt.signClass(chg)}">${fmt.pct(chg, 2)}</span> <span class="muted">vs last close</span>`;
-    $('wQTime').textContent = W.lastTime ? 'last trade ' + clockTime(W.lastTime) : (clock && clock.is_open ? '' : 'market closed · latest price');
+    $('wQTime').textContent = clock && clock.is_open
+      ? (W.lastTime ? 'last trade ' + clockTime(W.lastTime) : '')
+      : 'market closed' + (W.lastTime ? ' · price from ' + W.lastTime.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
     if (W.bar && wSeries) wSeries.update({ time: T(W.bar.t), open: W.bar.o, high: W.bar.h, low: W.bar.l, close: W.bar.c });
     // decision + rule checklist
     const open = clock && clock.is_open;
@@ -480,7 +576,8 @@
 
   /* ---------- boot ---------- */
   function boot() {
-    initKeys();
+    initKeys(); initFinnhub(); pickDefaultSource();
+    $('wSrc').addEventListener('change', () => { $('wSrc').dataset.touched = '1'; });
     fillAlgoSelect(); fillSymSelect();
     $('wAlgo').onchange = () => { const a = chosenAlgo(); if (a && a.sym) $('wSym').value = a.sym; };
     $('wStart').onclick = startWatch;
@@ -488,7 +585,7 @@
     $('wReset').onclick = () => { acct = freshAcct(); saveAcct(); renderWatchAccount(); A.toast('Pretend account reset.'); };
     $('acctRefresh').onclick = () => alp ? refreshAccount() : A.toast('Connect your Alpaca key first.');
     const orig = document.querySelector('[data-tab=live]');
-    orig.addEventListener('click', () => { renderForward(); renderBot(); fillAlgoSelect(); if (alp) { refreshAccount(); refreshClock(); } });
+    orig.addEventListener('click', () => { renderForward(); renderBot(); fillAlgoSelect(); if (alp) refreshAccount(); refreshClock(); });
     if (A.S.tab === 'live') { renderForward(); renderBot(); }
     document.addEventListener('tl-forward', () => { fillAlgoSelect(); if (A.S.tab === 'live') renderForward(); else renderBotMaker(); });
     document.addEventListener('tl-strategies', fillAlgoSelect);
