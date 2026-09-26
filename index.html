@@ -262,6 +262,42 @@
       <h3>Why the "hidden exam" matters</h3>
       <p>If you try thousands of settings, some will look amazing on the past purely by luck. That's like acing a test because you saw the answer key. The fix is to split the years. The tuner may only look at the <b>older</b> part. The winner is then tested on the <b>recent</b> part it never saw. If it does about as well there, it probably found something real. If it falls apart, it memorized noise.</p>
       <p>Signs of a trustworthy result: the exam score is close to the training score; many of the top 10 settings also pass the exam; and on the heatmap the best spot sits in a broad bright area, not a single lucky square.</p>
+      <h3 id="shield">The researched bot: Crash shield</h3>
+      <p>This bot came from a research run on the lab's own data, using the same engine as every other strategy here, including fees and slippage. The aim was a bot that earns about as much as simply holding, with smaller crashes, <b>and keeps doing that on years it never saw</b>.</p>
+      <p><b>How it was made.</b> The years were split into three parts:</p>
+      <ul>
+        <li><b>2000–2014:</b> designing and tuning.</li>
+        <li><b>2015–2020:</b> checking.</li>
+        <li><b>2021–2026:</b> a final exam, kept locked until the end and opened once.</li>
+      </ul>
+      <p>To avoid fitting one lucky stock, every design was tested on 10 funds: SPY, QQQ, DIA, IWM, VTI, XLE, XLF, XLK, TLT and GLD. A design only counted if it beat holding in <b>both</b> the design and check years. From the survivors, the settings were taken from a broad stable area rather than the single best score.</p>
+      <p><b>What it does.</b> It stays invested almost all the time. It sells only when <b>both</b> of these are true:</p>
+      <ul>
+        <li>the price is more than 6% below its 200-day average;</li>
+        <li>the price fell more than 4% over the last 15 trading days.</li>
+      </ul>
+      <p>It buys back as soon as the price is above its 200-day average again, <b>or</b> the last 15 days are positive. Every number is a dial, so you can tune it yourself in Auto-tune.</p>
+      <div class="tbl-wrap"><table class="data">
+        <thead><tr><th class="l" rowspan="2">Years<br><span class="muted">median of 10 funds</span></th><th colspan="2">Growth per year</th><th colspan="2">Worst drop</th></tr>
+          <tr><th>Shield</th><th>Holding</th><th>Shield</th><th>Holding</th></tr></thead>
+        <tbody>
+          <tr><td class="l">2000–2014 · design</td><td>7.3%</td><td>7.1%</td><td class="up">37%</td><td>56%</td></tr>
+          <tr><td class="l">2015–2020 · check</td><td>11.8%</td><td>11.1%</td><td class="up">24%</td><td>34%</td></tr>
+          <tr><td class="l">2021–2026 · final exam</td><td class="down">12.2%</td><td>14.3%</td><td class="down">29%</td><td>26%</td></tr>
+          <tr><td class="l">2000–2026 · everything</td><td>8.6%</td><td>8.9%</td><td class="up">39%</td><td>57%</td></tr>
+        </tbody></table></div>
+      <p><b>The honest verdict.</b> Over 26 years it earned about the same as holding and cut the worst crash by about a third. On the S&amp;P 500 fund, $10,000 became about $85,600 against $92,500 for holding, with a worst drop of 34% instead of 55%. It did <b>not</b> pass the final exam: in 2021–2026 it trailed holding. Think of it as insurance.</p>
+      <ul>
+        <li><b>Where it paid off:</b> slow crashes, like 2002 (−13% vs −22%) and 2008 (−17% vs −37%).</li>
+        <li><b>Where it cost you:</b> sudden drops that bounced straight back, like 2011 (−22% vs +2%) and 2025 (+4% vs +18%).</li>
+      </ul>
+      <p><b>What else was tried.</b></p>
+      <ul>
+        <li><b>Classic trend following and dip-buying</b> looked excellent on 2000–2014: about 9–10% a year with half the crash. Both collapsed on the check years, at about 3.5% a year against 11.1%. That is the hidden exam doing its job.</li>
+        <li><b>Stop-losses and trailing stops</b> made every design worse. They cut good positions short and the bot bought straight back in.</li>
+        <li><b>Nothing tested here reliably beat simply holding an index fund on return in every era.</b> The most a rule offered was similar long-run growth with smaller crashes.</li>
+      </ul>
+      <p>The research scripts are in the <a href="https://github.com/Just-Rice/trading-lab/tree/main/research">research folder</a> of the repository, if you want to check or extend the work.</p>
       <h3>Honest limits</h3>
       <ul>
         <li><b>Survivorship bias</b>: the stock list is made of companies that are big and successful <i>today</i>. A strategy tested on Nvidia or Apple benefits from knowing they survived. Index funds like SPY avoid most of this.</li>

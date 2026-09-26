@@ -12,7 +12,7 @@ It's plain HTML, CSS and JavaScript, with no build step and no server. Charts us
 - **Build your own** is a rule builder. You write BUY and SELL rules from dropdown ingredients: prices, averages, highs and lows, bands, RSI, % change, volume and position details. Rules combine with ALL/ANY.
   - Any number in a rule can become a dial that the tuner is allowed to turn.
   - There are safety settings for stop-loss, take-profit, trailing stop, time limit and money per trade.
-  - The three built-ins (trend following, momentum breakout, buy the dip) are editable recipes made the same way.
+  - The built-ins are editable recipes made the same way: **Crash shield (researched)**, trend following, momentum breakout and buy the dip. The Crash shield came out of the study in [`research/`](research/). Over 2000–2026 it earned about the same as holding with much smaller crashes, but it trailed holding in 2021–2026.
 - **Replay** shows the robot trading day by day, with play, pause, speed and a scrubber.
 - **Saved** keeps setups in your browser. You can compare up to five at once, and export or import everything as a file.
 - **Live** has four options:
@@ -44,6 +44,7 @@ The same engine (`js/core.js`) runs in the page, in the tuner's Web Worker and i
 | `js/live.js`, `js/alpaca.js`, `js/finnhub.js` | The Live tab, the Alpaca paper-trading client and the Finnhub live-price client |
 | `scripts/update_data.py` | Downloads daily prices for 42 stocks and funds from Yahoo Finance into `data/` |
 | `scripts/auto-trade.js` | The automatic daily bot |
+| `research/` | The study that produced the Crash shield, with its method and results |
 | `live/bot.json` | What the daily bot trades (made in the Live tab) |
 | `live/auto-log.json`, `live/auto-state.json` | What the bot did, and its open positions |
 

@@ -9,7 +9,7 @@
   const KEY = 'tradinglab.v1';
   const DEFAULTS = {
     market: { sym: 'SPY', period: 'all', start: '', end: '', capital: 10000, fee: 0.05, slip: 0.05 },
-    auto: { stratId: 'trend', strat: null, goal: 'sharpe', split: 70, budget: 1500, minTrades: 5 },
+    auto: { stratId: 'shield', strat: null, goal: 'sharpe', split: 70, budget: 1500, minTrades: 5 },
     edit: { strat: null, sourceId: 'trend' },
     custom: [], setups: [], forward: [], tab: 'auto',
   };
@@ -70,7 +70,7 @@
     TL.RECIPES.forEach(r => g1.append(h('option', { value: r.id }, r.name)));
     S.custom.forEach(r => g2.append(h('option', { value: r.id }, r.name)));
     sel.append(g1); if (S.custom.length) sel.append(g2);
-    sel.value = getStrategy(current) ? current : 'trend';
+    sel.value = getStrategy(current) ? current : 'shield';
   }
 
   /* ---------- theme + tabs ---------- */

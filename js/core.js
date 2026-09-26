@@ -143,7 +143,7 @@
     bbLower: { label: 'Lower band', group: 'Ranges', args: [{ name: 'days', def: 20, min: 2, max: 200 }, { name: 'width', def: 2, min: 0.5, max: 4, step: 0.5 }], scale: 'price', help: 'Bollinger band: the average price minus a number of standard deviations. Price below it is unusually low.' },
     rsi:     { label: 'RSI (0–100)', group: 'Momentum', args: [{ name: 'days', def: 14, min: 2, max: 50 }], scale: 'osc', help: 'Relative Strength Index: near 100 means it has been rising hard ("overbought"), near 0 means falling hard ("oversold").' },
     roc:     { label: '% change over', group: 'Momentum', args: [{ name: 'days', def: 1, min: 1, max: 250 }], scale: 'pct', help: 'How much the price has moved, in percent, over the last N days. 1 day = today\'s change.' },
-    dist:    { label: '% above average', group: 'Momentum', args: [{ name: 'days', def: 50, min: 2, max: 400 }], scale: 'pct', help: 'How far the price is above (positive) or below (negative) its N-day average, in percent.' },
+    dist:    { label: '% vs average', group: 'Momentum', args: [{ name: 'days', def: 50, min: 2, max: 400 }], scale: 'pct', help: 'How far the price is above (positive) or below (negative) its N-day average, in percent.' },
     atrPct:  { label: 'Daily swing size %', group: 'Momentum', args: [{ name: 'days', def: 14, min: 2, max: 100 }], scale: 'pct', help: 'Average true range as a % of price: how much the stock typically moves in a day.' },
     volRatio:{ label: 'Volume vs average (×)', group: 'Volume', args: [{ name: 'days', def: 20, min: 2, max: 200 }], scale: 'x', help: "Today's trading volume divided by its N-day average. 2 means twice as busy as usual." },
     daysHeld:{ label: 'Days held', group: 'My position', args: [], scale: 'pos', help: 'Trading days since the robot bought. Only meaningful in sell rules.' },
@@ -179,6 +179,25 @@
   }
 
   const RECIPES = [
+    {
+      id: 'shield', builtin: true, name: 'Crash shield (researched)',
+      desc: 'Found by testing thousands of settings on 10 funds and checking them on years they never saw. It stays invested almost all the time and steps aside only when the price is well below its long-term average AND has just dropped sharply, then buys back quickly. Over 2000–2026 it earned about the same as holding with much smaller crashes, but it trailed holding in 2021–2026. See How it works.',
+      params: {
+        trend: { label: 'Long-term average (days)', v: 200, min: 100, max: 300, step: 25, tune: true },
+        below: { label: 'Sell line: price vs average (%)', v: -6, min: -12, max: -2, step: 1, tune: true },
+        mom: { label: 'Recent change window (days)', v: 15, min: 5, max: 60, step: 5, tune: true },
+        drop: { label: 'Sell line: recent change (%)', v: -4, min: -10, max: -1, step: 1, tune: true },
+      },
+      buy: { mode: 'any', rules: [
+        { a: { k: 'dist', args: [{ p: 'trend' }] }, cmp: '>', b: { k: 'value', args: [{ v: 0 }] } },
+        { a: { k: 'roc', args: [{ p: 'mom' }] }, cmp: '>', b: { k: 'value', args: [{ v: 0 }] } },
+      ] },
+      sell: { mode: 'all', rules: [
+        { a: { k: 'dist', args: [{ p: 'trend' }] }, cmp: '<', b: { k: 'value', args: [{ p: 'below' }] } },
+        { a: { k: 'roc', args: [{ p: 'mom' }] }, cmp: '<', b: { k: 'value', args: [{ p: 'drop' }] } },
+      ] },
+      risk: defaultRisk(),
+    },
     {
       id: 'trend', builtin: true, name: 'Trend following',
       desc: 'Buys when the short-term average price climbs above the long-term average (the trend has turned up) and sells when it drops back below.',
@@ -256,7 +275,7 @@
       case 'bbLower': return `lower band (${a[0]} days, ${a[1]}×)`;
       case 'rsi': return `${a[0]}-day RSI`;
       case 'roc': return a[0] === '1' ? "today's % change" : `% change over ${a[0]} days`;
-      case 'dist': return `% above ${a[0]}-day average`;
+      case 'dist': return `price % vs ${a[0]}-day average`;
       case 'atrPct': return `daily swing size % (${a[0]} days)`;
       case 'volRatio': return `volume vs ${a[0]}-day average`;
     }
