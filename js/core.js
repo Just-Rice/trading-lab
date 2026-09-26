@@ -114,6 +114,30 @@
     return out;
   }
 
+  // Yearly volatility (%) of daily closes over the last p days.
+  function volOf(c, p) {
+    const n = c.length, out = nanArray(n);
+    let a = 0, b = 0;
+    for (let i = 1; i < n; i++) {
+      const r = c[i] / c[i - 1] - 1; a += r; b += r * r;
+      if (i > p) { const q = c[i - p] / c[i - p - 1] - 1; a -= q; b -= q * q; }
+      if (i >= p) out[i] = Math.sqrt(Math.max(0, b / p - (a / p) ** 2) * 252) * 100;
+    }
+    return out;
+  }
+  // 1 while the price is above its p-day average, with a band (%) so it doesn't flip back and forth.
+  function trendStateOf(s, p, band) {
+    const m = smaOf(s.close, p), out = new Float64Array(s.n);
+    let on = 0;
+    for (let i = 0; i < s.n; i++) {
+      if (!Number.isFinite(m[i])) { out[i] = 0; continue; }
+      if (on && s.close[i] < m[i] * (1 - band / 100)) on = 0;
+      else if (!on && s.close[i] > m[i] * (1 + band / 100)) on = 1;
+      out[i] = on;
+    }
+    return out;
+  }
+
   function atrPctOf(s, p) {
     const n = s.n, tr = new Float64Array(n), out = nanArray(n);
     for (let i = 0; i < n; i++) {
@@ -144,6 +168,7 @@
     rsi:     { label: 'RSI (0–100)', group: 'Momentum', args: [{ name: 'days', def: 14, min: 2, max: 50 }], scale: 'osc', help: 'Relative Strength Index: near 100 means it has been rising hard ("overbought"), near 0 means falling hard ("oversold").' },
     roc:     { label: '% change over', group: 'Momentum', args: [{ name: 'days', def: 1, min: 1, max: 250 }], scale: 'pct', help: 'How much the price has moved, in percent, over the last N days. 1 day = today\'s change.' },
     dist:    { label: '% vs average', group: 'Momentum', args: [{ name: 'days', def: 50, min: 2, max: 400 }], scale: 'pct', help: 'How far the price is above (positive) or below (negative) its N-day average, in percent.' },
+    vol:     { label: 'Volatility % a year', group: 'Momentum', args: [{ name: 'days', def: 20, min: 5, max: 250 }], scale: 'pct', help: 'How bumpy the ride has been: the yearly volatility of daily price moves over the last N days. The S&P 500 averages about 15–20%.' },
     atrPct:  { label: 'Daily swing size %', group: 'Momentum', args: [{ name: 'days', def: 14, min: 2, max: 100 }], scale: 'pct', help: 'Average true range as a % of price: how much the stock typically moves in a day.' },
     volRatio:{ label: 'Volume vs average (×)', group: 'Volume', args: [{ name: 'days', def: 20, min: 2, max: 200 }], scale: 'x', help: "Today's trading volume divided by its N-day average. 2 means twice as busy as usual." },
     daysHeld:{ label: 'Days held', group: 'My position', args: [], scale: 'pos', help: 'Trading days since the robot bought. Only meaningful in sell rules.' },
@@ -277,6 +302,7 @@
       case 'roc': return a[0] === '1' ? "today's % change" : `% change over ${a[0]} days`;
       case 'dist': return `price % vs ${a[0]}-day average`;
       case 'atrPct': return `daily swing size % (${a[0]} days)`;
+      case 'vol': return `${a[0]}-day volatility %`;
       case 'volRatio': return `volume vs ${a[0]}-day average`;
     }
     return d.label.toLowerCase();
@@ -312,6 +338,8 @@
       case 'roc': a = rocOf(s.close, p); break;
       case 'dist': { const m = indicator(s, 'sma', [p]); a = new Float64Array(s.n); for (let i = 0; i < s.n; i++) a[i] = (s.close[i] / m[i] - 1) * 100; break; }
       case 'atrPct': a = atrPctOf(s, p); break;
+      case 'vol': a = volOf(s.close, p); break;
+      case 'trendOn': a = trendStateOf(s, p, args[1] || 0); break;
       case 'volRatio': { const m = smaOf(s.volume, p); a = new Float64Array(s.n); for (let i = 0; i < s.n; i++) a[i] = m[i] > 0 ? s.volume[i] / m[i] : NaN; break; }
       default: a = nanArray(s.n);
     }
@@ -586,6 +614,7 @@
   function isRebalanceDay(cal, i, freq) {
     if (i >= cal.n - 1) return false;
     const a = new Date(cal.t[i] * 864e5), b = new Date(cal.t[i + 1] * 864e5);
+    if (freq === 'daily') return true;
     if (freq === 'weekly') return b.getUTCDay() < a.getUTCDay() || cal.t[i + 1] - cal.t[i] >= 7;
     const monthEnd = a.getUTCMonth() !== b.getUTCMonth();
     if (freq === 'quarterly') return monthEnd && a.getUTCMonth() % 3 === 2;
@@ -617,6 +646,23 @@
       if (strat.weighting === 'invvol') { const inv = list.map(s2 => 1 / vol(s2)), tot = inv.reduce((a, b) => a + b, 0); return list.map((s2, k) => inv[k] / tot); }
       return list.map(() => 1 / list.length);
     };
+    if (strat.mode === 'leverage') {
+      // Boost: hold up to 2x the base fund while its trend is up (optionally steered by volatility), T-bills otherwise.
+      const base = strat.base || 'SPY', lev = strat.lev || 'SSO', levX = strat.levX || 2;
+      const bs = U.series[base], jb = U.idx[base][i];
+      if (jb < 0 || !U.idx[lev] || U.idx[lev][i] < 0) { add(safe, 1); return { weights: out, info, safe }; }
+      const on = indicator(bs, 'trendOn', [Math.round(pfNum(strat, strat.trendDays, 150)), pfNum(strat, strat.band, 3)])[jb];
+      let e = on ? pfNum(strat, strat.boost, 1.5) : 0;
+      if (on && strat.steer === 'vol') {
+        const v = indicator(bs, 'vol', [Math.round(pfNum(strat, strat.volDays, 20))])[jb];
+        if (v > 0) e = Math.round(Math.min(pfNum(strat, strat.cap, 2), pfNum(strat, strat.tv, 21) / v) * 4) / 4; // quarter steps, to limit trading
+      }
+      e = Math.max(0, Math.min(levX, e));
+      if (e <= 1) { add(base, e); add(safe, 1 - e); }
+      else { const wl = (e - 1) / (levX - 1); add(lev, wl); add(base, 1 - wl); }
+      info.push({ sym: base, ok: !!on, score: e, exposure: e });
+      return { weights: out, info, safe, exposure: e };
+    }
     if (!eligible.length) { add(safe, 1); return { weights: out, info, safe }; }
     if (strat.mode === 'fixed') {
       const w = strat.weights || {}, tot = eligible.reduce((a, s2) => a + (+w[s2] || 0), 0);
@@ -715,7 +761,29 @@
     filter: { label: 'Trend average (days)', v: 150, min: 50, max: 300, step: 25, tune: true },
   });
   const pfBase = (o) => Object.assign({ type: 'portfolio', builtin: true, rebalance: 'monthly', safe: 'SHY', weighting: 'equal', lookMode: 'blend', absFilter: 'none', top: { p: 'top' }, look: { p: 'look' }, filter: { p: 'filter' }, params: pfDials() }, o);
+  const levDials = (o) => Object.assign({
+    boost: { label: 'Boost: how many times the S&P 500 (x)', v: 1.5, min: 1, max: 2, step: 0.25, tune: true },
+    trendDays: { label: 'Trend average (days)', v: 150, min: 50, max: 300, step: 25, tune: true },
+    band: { label: 'Buffer around the average (%)', v: 3, min: 0, max: 5, step: 1, tune: true },
+    tv: { label: 'Target volatility (% a year)', v: 21, min: 10, max: 30, step: 1, tune: false },
+    volDays: { label: 'Volatility lookback (days)', v: 20, min: 10, max: 60, step: 5, tune: false },
+    cap: { label: 'Most boost allowed (x)', v: 2, min: 1, max: 2, step: 0.25, tune: false },
+  }, o);
+  const levBase = (o) => pfBase(Object.assign({ mode: 'leverage', assets: ['SPY', 'SSO'], safe: 'BIL', base: 'SPY', lev: 'SSO', levX: 2, rebalance: 'daily', steer: 'trend',
+    boost: { p: 'boost' }, trendDays: { p: 'trendDays' }, band: { p: 'band' }, tv: { p: 'tv' }, volDays: { p: 'volDays' }, cap: { p: 'cap' } }, o));
   const PORTFOLIOS = [
+    levBase({ id: 'lev-gentle', name: 'Gentle boost: 1.5x while trending up (researched)', params: levDials(),
+      desc: 'Holds 1.5x the S&P 500 (a mix of the S&P 500 fund and a 2x fund) while it is more than 3% above its 150-day average, and T-bills after it falls 3% below. The only research pick that beat holding in both fresh tests: 1950–2000 and 1928–1949. Over 1928–2026 it grew 11.5% a year against 9.6%, with a worst drop of 54% against 84%. It still trailed holding in 2021–2026, and a sudden one-day crash can hit before it switches.' }),
+    levBase({ id: 'lev-steer', name: 'Smooth boost: trend + volatility steering (researched)', steer: 'vol', params: levDials({
+      boost: { label: 'Boost when not steering (x)', v: 1.5, min: 1, max: 2, step: 0.25, tune: false },
+      trendDays: { label: 'Trend average (days)', v: 200, min: 50, max: 300, step: 25, tune: true },
+      band: { label: 'Buffer around the average (%)', v: 2, min: 0, max: 5, step: 1, tune: true },
+      tv: { label: 'Target volatility (% a year)', v: 21, min: 10, max: 30, step: 1, tune: true } }),
+      desc: 'While the S&P 500 is above its 200-day average, holds more when the market is calm and less when it is wild (aiming for 21% yearly volatility, at most 2x); T-bills otherwise. Best numbers in the 1950–2000 fresh exam (16.0% a year against 12.7%, worst drop 39% against 48%) and the smallest drop of 2021–2026. It was not the rule\'s pick, because it trailed holding in 2011–2020, and it trades more often.' }),
+    levBase({ id: 'lev-moderate', name: 'Moderate boost: 2x while trending up (researched)', params: levDials({
+      boost: { label: 'Boost: how many times the S&P 500 (x)', v: 2, min: 1, max: 2, step: 0.25, tune: true },
+      band: { label: 'Buffer around the average (%)', v: 2, min: 0, max: 5, step: 1, tune: true } }),
+      desc: 'Holds 2x the S&P 500 while it is above its 150-day average, T-bills otherwise. The most growth of the sensible options: 13.5% a year over 1928–2026. But it failed the 1950–2000 exam: on Black Monday 1987 it lost about 35% in one day, before its switch could react. It also lost 35% in 2022.' }),
     pfBase({ id: 'pf-balanced', name: 'Balanced: stocks, bonds and gold (researched)', mode: 'fixed', assets: ['SPY', 'TLT', 'GLD'], weights: { SPY: 50, TLT: 35, GLD: 15 },
       desc: 'Half in the S&P 500, a third in long-term government bonds and the rest in gold, topped back up every month. In the research it had much smaller crashes than stocks alone (in 2008 it lost 10% while the S&P 500 lost 37%), but it grew more slowly and trailed the S&P 500 badly in 2021–2026, when bonds fell with stocks.' }),
     pfBase({ id: 'pf-steady', name: 'Steady: mostly bonds (researched)', mode: 'fixed', assets: ['SPY', 'IEF', 'GLD'], weights: { SPY: 30, IEF: 60, GLD: 10 },

@@ -13,6 +13,7 @@
     fixed: 'Fixed mix: always holds the same shares of each fund, topped back up every month.',
     trend: 'Trend-protected: like a fixed mix, but each fund steps aside into the safe fund while its price is below its long-term average.',
     momentum: 'Momentum rotation: each month, holds the funds that have risen most recently.',
+    leverage: 'Boost with leverage: holds up to 2x the S&P 500 while it is trending up (a mix of the S&P 500 fund and a 2x fund), and T-bills when it is not.',
   };
   const allPf = () => [...TL.PORTFOLIOS, ...S.portfolios];
   const getPf = (id) => allPf().find(p => p.id === id);
@@ -24,9 +25,9 @@
   function fillSelect() {
     const sel = $('pStrat');
     sel.innerHTML = '';
-    const g1 = h('optgroup', { label: 'Ready-made' });
-    TL.PORTFOLIOS.forEach(p => g1.append(h('option', { value: p.id }, p.name)));
-    sel.append(g1);
+    const g0 = h('optgroup', { label: 'Boost with leverage (riskier)' }), g1 = h('optgroup', { label: 'Mixes and rotation' });
+    TL.PORTFOLIOS.forEach(p => (p.mode === 'leverage' ? g0 : g1).append(h('option', { value: p.id }, p.name)));
+    sel.append(g1, g0);
     if (S.portfolios.length) { const g2 = h('optgroup', { label: 'My portfolios' }); S.portfolios.forEach(p => g2.append(h('option', { value: p.id }, p.name))); sel.append(g2); }
     sel.value = getPf(S.pf.stratId) ? S.pf.stratId : 'pf-balanced';
   }
@@ -47,10 +48,17 @@
     name.oninput = () => { st.name = name.value; A.persist(); };
     ed.append(h('label', { class: 'fld' }, h('span', {}, 'Name'), name));
 
-    const mode = h('select', { 'aria-label': 'How it decides' }, ...Object.keys(MODES).map(k => h('option', { value: k }, { fixed: 'Fixed mix', trend: 'Trend-protected mix', momentum: 'Momentum rotation' }[k])));
+    const mode = h('select', { 'aria-label': 'How it decides' }, ...Object.keys(MODES).map(k => h('option', { value: k }, { fixed: 'Fixed mix', trend: 'Trend-protected mix', momentum: 'Momentum rotation', leverage: 'Boost with leverage' }[k])));
     mode.value = st.mode;
-    mode.onchange = () => { st.mode = mode.value; if (st.mode !== 'momentum' && !st.weights) st.weights = {}; changed(); renderControls(); };
+    mode.onchange = () => {
+      const prev = st.mode; st.mode = mode.value;
+      if (st.mode === 'leverage' && prev !== 'leverage') Object.assign(st, TL.clone(TL.PORTFOLIOS.find(p => p.id === 'lev-gentle')), { id: st.id, name: st.name, builtin: st.builtin });
+      else if (prev === 'leverage' && st.mode !== 'leverage') { st.assets = ['SPY', 'IEF', 'GLD']; st.weights = { SPY: 50, IEF: 35, GLD: 15 }; st.safe = 'SHY'; st.rebalance = 'monthly'; }
+      if (st.mode !== 'momentum' && !st.weights) st.weights = {};
+      changed(); renderControls();
+    };
     ed.append(h('label', { class: 'fld' }, h('span', {}, 'How it decides'), mode), h('p', { class: 'hint' }, MODES[st.mode]));
+    if (st.mode === 'leverage') { renderLeverage(ed, st, changed); return; }
 
     // Funds to choose from
     ed.append(h('h3', { class: 'sub' }, st.mode === 'momentum' ? 'Funds it can choose from' : 'Funds it holds'));
@@ -145,6 +153,28 @@
     }
     ed.append(more);
   }
+  // Settings for the leverage bots: how much boost, the trend switch, and optional volatility steering.
+  function renderLeverage(ed, st, changed) {
+    const num = (key, label, step, min, max) => {
+      const i = h('input', { type: 'number', step, min, max, value: TL.val(st, st[key]), style: 'width:100px' });
+      i.oninput = () => { const v = parseFloat(i.value); if (Number.isFinite(v) && v >= min && v <= max) { setNum(st, key, v); changed(); } };
+      return h('label', { class: 'fld' }, h('span', {}, label), i);
+    };
+    const steer = h('select', {}, h('option', { value: 'trend' }, 'Fixed boost while the trend is up'), h('option', { value: 'vol' }, 'Steer by volatility: more when calm, less when wild'));
+    steer.value = st.steer || 'trend';
+    steer.onchange = () => { st.steer = steer.value; changed(); renderControls(); };
+    ed.append(h('p', { class: 'warnline' }, 'Leverage multiplies gains and losses. A sudden one-day crash can hit before the trend switch reacts: on Black Monday 1987 a 2x version lost about 35% in a day.'));
+    ed.append(h('label', { class: 'fld' }, h('span', {}, 'How it sizes the boost'), steer));
+    if (st.steer === 'vol') {
+      ed.append(num('tv', 'Aim for this yearly volatility (%)', 1, 5, 40), num('cap', 'Most boost allowed (x, up to 2)', 0.25, 1, 2), num('volDays', 'Volatility lookback (days)', 5, 5, 120));
+    } else ed.append(num('boost', 'Boost: how many times the S&P 500 (1 to 2)', 0.25, 1, 2));
+    ed.append(num('trendDays', 'Trend average (days)', 25, 20, 400), num('band', 'Buffer around the average (%)', 1, 0, 10));
+    ed.append(h('p', { class: 'hint' }, 'It checks every day. It holds the boost while the S&P 500 is above its average by more than the buffer, and moves to T-bills (BIL) once it falls below by more than the buffer.'));
+    const more = h('details', { class: 'fold' }, h('summary', {}, 'Settings the tuner may change'));
+    const dials = h('div', { class: 'dials' });
+    dialsEditor(dials, relevantDials(st), { onChange: () => { A.persist(); debouncedRefresh(); }, editableLabels: false, allowDelete: false, rerender: renderControls });
+    more.append(dials); ed.append(more);
+  }
   // Numbers in the rotation rules live in dials, so the tuner can use them too.
   function setNum(st, key, v) {
     st.params = st.params || {};
@@ -154,13 +184,17 @@
   }
   // A view of the strategy whose params list only the dials this mode actually uses.
   function relevantDials(st) {
-    const keys = st.mode === 'trend' ? ['filter'] : ['top', ...(st.lookMode === 'single' ? ['look'] : []), ...(st.absFilter === 'trend' ? ['filter'] : [])];
+    const keys = st.mode === 'leverage' ? (st.steer === 'vol' ? ['tv', 'cap', 'trendDays', 'band'] : ['boost', 'trendDays', 'band'])
+      : st.mode === 'trend' ? ['filter'] : ['top', ...(st.lookMode === 'single' ? ['look'] : []), ...(st.absFilter === 'trend' ? ['filter'] : [])];
     const view = Object.create(st);
     view.params = {};
     for (const k of keys) if (st.params && st.params[k]) view.params[k] = st.params[k];
     return view;
   }
   function describe(st) {
+    if (st.mode === 'leverage') return st.steer === 'vol'
+      ? `While the S&P 500 is above its ${TL.val(st, st.trendDays)}-day average, holds up to ${TL.val(st, st.cap)}x, aiming for ${TL.val(st, st.tv)}% yearly volatility; T-bills otherwise.`
+      : `Holds ${TL.val(st, st.boost)}x the S&P 500 while it is above its ${TL.val(st, st.trendDays)}-day average; T-bills otherwise.`;
     if (st.mode === 'momentum') return `Each ${st.rebalance === 'weekly' ? 'week' : st.rebalance === 'quarterly' ? 'quarter' : 'month'}, holds the top ${TL.val(st, st.top)} of ${st.assets.join(', ')} by recent gains.`;
     const w = st.weights || {}, tot = st.assets.reduce((a, x) => a + (+w[x] || 0), 0);
     const parts = st.assets.map(x => `${tot ? Math.round((+w[x] || 0) / tot * 100) : Math.round(100 / st.assets.length)}% ${x}`);
@@ -198,7 +232,7 @@
     const splitNote = pfResult ? ' The shaded part of the chart is the exam years.' : '';
     el.innerHTML = `<div class="card results">
       <div class="res-head"><h2>${esc(st.name)}</h2><span class="sub">${fmt.date(U.cal.t[res.from])} – ${fmt.date(U.cal.t[res.to])} · ${m.years.toFixed(1)} years</span></div>
-      ${lateStart(st, U, res.from)}
+      ${lateStart(st, U, res.from)}${simNote(st)}
       <p class="summary-line">Over ${m.years.toFixed(0)} years, this portfolio turned ${fmt.money(cap)} into <b class="${m.final >= b.final ? 'up' : 'down'}">${fmt.money(m.final)}</b>. Just holding the S&amp;P 500 would have made ${fmt.money(b.final)}, and a classic 60/40 mix ${fmt.money(c6.final)}. Its worst drop was ${fmt.pctPlain(m.maxDD, 0)} (S&amp;P 500: ${fmt.pctPlain(b.maxDD, 0)}).</p>
       <div class="tiles main">
         ${tile('Money at the end', fmt.money(m.final), `S&amp;P 500: ${fmt.money(b.final)}`, m.final >= b.final)}
@@ -233,13 +267,19 @@
     const now = TL.decidePortfolio(U, st).weights;
     const syms = Object.keys(now).filter(x => now[x] > 0.0001).sort((a, c) => now[c] - now[a]);
     $('pNow').innerHTML = syms.map(x => `<div class="holding"><span class="sw" style="background:${colorFor(st, x)}"></span><span>${x === 'cash' ? 'Cash' : esc(x)}</span><b>${(now[x] * 100).toFixed(0)}%</b></div>`).join('');
-    $('pNowNote').textContent = `Based on prices up to ${fmt.date(U.cal.t[U.cal.n - 1])}. ${st.mode === 'fixed' ? 'A fixed mix only tops these back up.' : 'This can change at the next rebalance.'} ${st.rebalance === 'weekly' ? 'It rebalances every week.' : `It rebalances at the start of each ${st.rebalance === 'quarterly' ? 'quarter' : 'month'}.`}`;
+    $('pNowNote').textContent = `Based on prices up to ${fmt.date(U.cal.t[U.cal.n - 1])}. ${st.mode === 'fixed' ? 'A fixed mix only tops these back up.' : 'This can change at the next rebalance.'} ${st.rebalance === 'daily' ? 'It checks every day and trades only when the mix needs to change.' : st.rebalance === 'weekly' ? 'It rebalances every week.' : `It rebalances at the start of each ${st.rebalance === 'quarterly' ? 'quarter' : 'month'}.`}`;
     // rebalance log
     const rows = res.rebal.slice().reverse().slice(0, 400).map(r => {
       const w = Object.entries(r.weights).filter(([, v]) => v > 0.0001).sort((a, c) => c[1] - a[1]).map(([k, v]) => `${k === 'cash' ? 'Cash' : k} ${(v * 100).toFixed(0)}%`).join(', ');
       return `<tr><td class="l">${fmt.date(U.cal.t[r.i])}</td><td class="l" style="white-space:normal">${esc(w)}</td></tr>`;
     }).join('');
     $('pLog').innerHTML = `<table class="data"><thead><tr><th class="l">Decided on</th><th class="l">Holds (from the next morning)</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  // Say plainly which parts of the history are simulated.
+  function simNote(st) {
+    const sims = A.pfSyms(st).map(A.metaOf).filter(m => m && m.simUntil && st.assets.concat(st.safe || []).includes(m.s));
+    if (!sims.length) return '';
+    return `<p class="hint">Simulated history: ${sims.map(m => `${esc(m.s)} before ${fmt.date(A.isoToDay(m.simUntil))}`).join(', ')}. That part is built from the S&amp;P 500 fund and T-bill rates, with the real fund's costs.</p>`;
   }
   // Explain a late start caused by a fund with a short history.
   function lateStart(st, U, from) {
@@ -295,7 +335,7 @@
   function hideExam() { const el = $('pExam'); el.className = 'card exam hidden'; el.innerHTML = ''; }
   async function runTuner() {
     const st = S.pf.strat;
-    if (st.mode === 'fixed') { A.toast('A fixed mix has no settings to tune. Switch "How it decides" to trend or momentum, or change the mix yourself.'); return; }
+    if (st.mode === 'fixed') { A.toast('A fixed mix has no settings to tune. Switch "How it decides" to another option, or change the mix yourself.'); return; }
     const view = relevantDials(st);
     if (!Object.values(view.params).some(d => d.tune)) { A.toast('Tick at least one setting under "More options" for the tuner to change.'); return; }
     const U = await A.loadUniverse(A.pfSyms(st)), r = A.pfRange(U, st);

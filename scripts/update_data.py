@@ -31,6 +31,8 @@ TICKERS = [
     ("IEF", "Medium-term US Treasury bonds (7-10 years)", "Bonds"),
     ("SHY", "Short-term US Treasury bonds (1-3 years)", "Bonds"),
     ("BIL", "US Treasury bills (cash-like)", "Bonds"),
+    ("SSO", "2x S&P 500 (leveraged, resets daily)", "Leveraged funds"),
+    ("UPRO", "3x S&P 500 (leveraged, resets daily)", "Leveraged funds"),
     ("AGG", "Total US bond market", "Bonds"),
     ("TIP", "Inflation-protected US Treasury bonds", "Bonds"),
     ("LQD", "Investment-grade corporate bonds", "Bonds"),
@@ -116,6 +118,70 @@ def fetch(symbol):
     return out
 
 
+# Some funds are younger than the rest of the data. Their earlier history is simulated so
+# tests can start in 2000: BIL from the 3-month T-bill rate, SSO and UPRO from the S&P 500
+# fund's daily returns with the same borrowing cost and fees as the real funds.
+# T-bill rates come from Yahoo's 13-week Treasury bill yield (^IRX).
+SIMULATE = {"BIL": ("tbill", 0), "SSO": ("lever", 2), "UPRO": ("lever", 3)}
+SPREAD, LEV_FEE = 0.006, 0.009
+
+
+def tbill_rates():
+    """Daily 13-week T-bill yield (as a fraction) from Yahoo's ^IRX, keyed by day."""
+    now = int(time.time()) + 86400
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/%5EIRX?period1={START}&period2={now}&interval=1d"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (trading-lab data updater)"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        res = json.load(r)["chart"]["result"][0]
+    off = res["meta"].get("gmtoffset", -14400)
+    out = {}
+    for ts, c in zip(res["timestamp"], res["indicators"]["quote"][0]["close"]):
+        if c is not None:
+            out[(ts + off) // 86400] = c / 100
+    return out
+
+
+def extend(real, spy, kind, lev, tbill):
+    """Prepend simulated days (from spy) before the real fund's first day."""
+    first = real["t"][0]
+    days = [k for k, t in enumerate(spy["t"]) if t < first]
+    if not days:
+        return real, None
+    rates, last = [], 0.02
+    keys = sorted(tbill)
+    j = 0
+    for k in days:
+        while j < len(keys) and keys[j] <= spy["t"][k]:
+            last = tbill[keys[j]]; j += 1
+        rates.append(last / 252)
+    # walk backwards from the real fund's first close so the two pieces join seamlessly
+    sim = {"t": [], "o": [], "h": [], "l": [], "c": [], "v": []}
+    c_next = real["c"][0]
+    k_first = days[-1] + 1  # spy index of the real fund's first day
+    closes = [0.0] * len(days)
+    for n in range(len(days) - 1, -1, -1):
+        k = days[n]
+        nxt = k + 1
+        r_spy = spy["c"][nxt] / spy["c"][k] - 1
+        rf = rates[n]
+        r = rf if kind == "tbill" else lev * r_spy + (1 - lev) * rf - ((lev - 1) * SPREAD + LEV_FEE) / 252
+        closes[n] = c_next / (1 + r)
+        c_next = closes[n]
+    for n, k in enumerate(days):
+        c = closes[n]
+        if kind == "tbill":
+            o = h = l = c
+        else:
+            prev = spy["c"][k - 1] if k > 0 else spy["o"][k]
+            o = c / (1 + lev * (spy["c"][k] / spy["o"][k] - 1)) if spy["o"][k] > 0 else c
+            h, l = max(o, c), min(o, c)
+        for key, val in (("t", spy["t"][k]), ("o", sig(o)), ("h", sig(h)), ("l", sig(l)), ("c", sig(c)), ("v", 0)):
+            sim[key].append(val)
+    out = {k: sim[k] + real[k] for k in "tohlcv"}
+    out["s"] = real["s"]
+    return out, first
+
+
 def day_str(d):
     return datetime.fromtimestamp(d * 86400, tz=timezone.utc).strftime("%Y-%m-%d")
 
@@ -150,6 +216,30 @@ def main():
             if symbol in old and os.path.exists(os.path.join(DATA, f"{symbol}.json")):
                 entries.append({**old[symbol], "n": name, "g": group})
         time.sleep(0.4)
+    # Extend young funds backwards with simulated history (needs the S&P 500 fund and T-bill rates).
+    try:
+        spy = json.load(open(os.path.join(DATA, "SPY.json")))
+        tbill = tbill_rates()
+        for sym, (kind, lev) in SIMULATE.items():
+            path = os.path.join(DATA, f"{sym}.json")
+            if not os.path.exists(path):
+                continue
+            real = json.load(open(path))
+            if "simUntil" in real:  # already extended: strip the old simulated part first
+                cut = real["t"].index(real["simUntil"])
+                real = {k: real[k][cut:] for k in "tohlcv"} | {"s": real["s"]}
+            ext, first = extend(real, spy, kind, lev, tbill)
+            if first is None:
+                continue
+            ext["simUntil"] = first
+            with open(path, "w") as f:
+                json.dump(ext, f, separators=(",", ":"))
+            for e in entries:
+                if e["s"] == sym:
+                    e["from"] = day_str(ext["t"][0]); e["rows"] = len(ext["t"]); e["simUntil"] = day_str(first)
+            print(f"{sym:6} simulated before {day_str(first)}")
+    except Exception as e:
+        print(f"Simulated history skipped: {e}", file=sys.stderr)
     manifest = {"updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "tickers": entries}
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=1)

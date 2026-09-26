@@ -430,6 +430,44 @@
       </ul>
       <p><b>The takeaway</b> is the same as for single stocks. Spreading money across stocks, bonds and gold made the ride much smoother over 23 years, but no mix or rotation rule reliably earned more than the S&amp;P 500. There are also years when stocks and bonds fall together.</p>
       <p>A note on fairness: the final-exam data was never used to choose anything, but the person running the research knew in broad terms what happened in those years. The ready-made portfolios on this site are the ones picked before the exam, with their exam results shown honestly. Scripts are in the <a href="https://github.com/Just-Rice/trading-lab/tree/main/research">research folder</a>.</p>
+      <h3 id="leverage">Round three: trying to beat holding</h3>
+      <p>Every robot above could only win by dodging crashes, because it never held more than 100% in the market. To <b>earn more</b> than holding, a robot has to sometimes hold more than 100%, using leverage (borrowed money), or pick something better than the market. Round three tried four ideas:</p>
+      <ul>
+        <li><b>A.</b> Leverage with a trend safety switch.</li>
+        <li><b>B.</b> Volatility steering: hold more when the market is calm, less when it is wild.</li>
+        <li><b>C.</b> More clues: trend, momentum, calm markets, the yield curve, corporate-bond stress and the fear index.</li>
+        <li><b>D.</b> Sector rotation among 10 industries.</li>
+      </ul>
+      <p><b>A tougher bar.</b> To count as better, a robot had to earn more per year than holding <b>and</b> have a worst drop no bigger than holding's. Without that second condition, simply borrowing to double up would win.</p>
+      <p><b>Fresh exams.</b> The 2021–2026 years had already been used, so this round added Ken French's research data: US stock returns including dividends, and T-bill rates, back to 1926.</p>
+      <ul>
+        <li><b>2001–2020:</b> designing.</li>
+        <li><b>1950–2000:</b> a fresh exam that no robot had ever seen.</li>
+        <li><b>1928–1949:</b> a stress test that includes the Great Depression.</li>
+      </ul>
+      <p>The simulated leverage was checked against the real 2x and 3x funds and came within 0.2–0.7% a year of them. The borrowing cost was then set slightly higher, to err on the safe side.</p>
+      <div class="tbl-wrap"><table class="data">
+        <thead><tr><th class="l" rowspan="2">Robot</th><th colspan="4">Growth per year · worst drop</th></tr>
+          <tr><th>1950–2000 exam</th><th>1928–1949 stress</th><th>2021–2026</th><th>1928–2026</th></tr></thead>
+        <tbody>
+          <tr><td class="l">Just holding</td><td>12.7% · 48%</td><td>3.9% · 84%</td><td>14.0% · 26%</td><td>9.6% · 84%</td></tr>
+          <tr><td class="l">Gentle boost (1.5x + trend switch)</td><td class="up">13.9% · 47%</td><td class="up">6.7% · 54%</td><td class="down">12.5% · 26%</td><td>11.5% · 54%</td></tr>
+          <tr><td class="l">Smooth boost (trend + volatility steering)</td><td class="up">16.0% · 39%</td><td class="up">8.4% · 64%</td><td class="down">12.8% · 22%</td><td>12.8% · 64%</td></tr>
+          <tr><td class="l">Moderate boost (2x + trend switch)</td><td class="down">15.4% · 57%</td><td class="up">9.7% · 63%</td><td class="down">12.9% · 42%</td><td>13.5% · 63%</td></tr>
+          <tr><td class="l">Bold (3x + trend switch)</td><td class="down">21.6% · 75%</td><td class="down">8.3% · 89%</td><td class="down">10.4% · 67%</td><td>–</td></tr>
+          <tr><td class="l">More clues (trend + calm, up to 3x)</td><td class="up">13.4% · 46%</td><td class="down">−3.2% · 95%</td><td class="down">11.7% · 34%</td><td>–</td></tr>
+          <tr><td class="l">Sector rotation (top 2 of 10)</td><td class="down">14.1% · 50%</td><td class="down">4.5% · 85%</td><td class="down">9.5% · 35%</td><td>–</td></tr>
+        </tbody></table></div>
+      <p class="hint">Green means it beat holding by the tougher rule in that period. These research numbers use the whole US stock market; on this site the robots trade the S&amp;P 500 fund (SPY) and a 2x S&amp;P 500 fund (SSO). They check the trend every day and act on the next day's price.</p>
+      <p><b>What was learned.</b></p>
+      <ul>
+        <li><b>Gentle boost is the most dependable.</b> It was the only robot my rule picked that beat holding in <b>both</b> fresh tests.</li>
+        <li><b>Smooth boost had the best fresh-exam numbers</b>, but my rule didn't pick it, because it trailed holding in 2011–2020.</li>
+        <li><b>Moderate boost earned the most of the sensible options</b>, but it failed the 1950–2000 exam. On Black Monday, 19 October 1987, the market fell 17% in a single day. The robot's switch only checks the closing price, so it was still fully boosted and lost about 35% that day. Its worst drop reached 57%, more than holding's worst in those years (48%).</li>
+        <li><b>More clues overfit.</b> They fitted recent decades and collapsed in the Depression, with a 95% drop. <b>3x leverage</b> made the most money but had drops of 75–89%.</li>
+        <li><b>None of them beat holding in 2021–2026.</b> All of them lose more than holding in some years: the leveraged robots lost 25–32% in 2000, and Moderate lost 35% in 2022.</li>
+      </ul>
+      <p><b>About real leveraged funds.</b> 2x and 3x funds reset every day, so over long choppy stretches they can lose even when the market ends up flat. They are built for short-term trading. On this site their history before 2006 (2x) and 2009 (3x) is simulated from the S&amp;P 500 fund and T-bill rates, with the real funds' costs. Idle money in these robots earns T-bill interest through a Treasury-bill fund (BIL), simulated before 2007.</p>
       <h3>Honest limits</h3>
       <ul>
         <li><b>Survivorship bias</b>: the stock list is made of companies that are big and successful <i>today</i>. A strategy tested on Nvidia or Apple benefits from knowing they survived. Index funds like SPY avoid most of this.</li>
@@ -438,7 +476,7 @@
         <li>Past results don't guarantee future results. This is a learning tool, not financial advice.</li>
       </ul>
       <h3>Where the prices come from</h3>
-      <p>Daily prices for 59 US stocks and funds are downloaded from Yahoo Finance every weeknight after the market closes, by a GitHub Action in this project's repository. Live prices come from your own free Finnhub key, or from your Alpaca account (the IEX exchange feed, free with any Alpaca account).</p>
+      <p>Daily prices for 61 US stocks and funds are downloaded from Yahoo Finance every weeknight after the market closes, by a GitHub Action in this project's repository. Live prices come from your own free Finnhub key, or from your Alpaca account (the IEX exchange feed, free with any Alpaca account).</p>
       <p>Code: <a href="https://github.com/Just-Rice/trading-lab">github.com/Just-Rice/trading-lab</a></p>
     </div>
   </section>

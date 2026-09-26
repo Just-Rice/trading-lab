@@ -52,6 +52,7 @@ function budgetFor(bot, equity) {
 // Which rebalance period a day falls in, so a portfolio bot rebalances once per period.
 function periodKey(day, freq) {
   const d = new Date(day * 864e5), y = d.getUTCFullYear(), m = d.getUTCMonth();
+  if (freq === 'daily') return new Date(day * 864e5).toISOString().slice(0, 10);
   if (freq === 'weekly') return 'W' + Math.floor((day + 3) / 7);
   if (freq === 'quarterly') return `${y}-Q${Math.floor(m / 3) + 1}`;
   return `${y}-${String(m + 1).padStart(2, '0')}`;
