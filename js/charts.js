@@ -10,7 +10,7 @@
 
   /* ---------- formatting ---------- */
   const fmt = {
-    money(x) { if (!Number.isFinite(x)) return '–'; const a = Math.abs(x); return (x < 0 ? '−$' : '$') + (a >= 1e6 ? (a / 1e6).toFixed(2) + 'M' : a >= 1e4 ? Math.round(a).toLocaleString('en-US') : a.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: a < 1000 ? 2 : 0 })); },
+    money(x) { if (!Number.isFinite(x)) return '–'; const a = Math.abs(x); return (x < 0 ? '−$' : '$') + (a >= 1e6 ? (a / 1e6).toFixed(2) + 'M' : a >= 1000 ? Math.round(a).toLocaleString('en-US') : a.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })); },
     price(x) { return Number.isFinite(x) ? '$' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '–'; },
     pct(x, d = 1) { return Number.isFinite(x) ? (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d) + '%' : '–'; },
     pctPlain(x, d = 1) { return Number.isFinite(x) ? Math.abs(x).toFixed(d) + '%' : '–'; },

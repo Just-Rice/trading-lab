@@ -205,7 +205,25 @@
     try { const a = JSON.parse(localStorage.getItem(WKEY) || 'null'); if (a) return a; } catch (e) { /* ignore */ }
     return freshAcct();
   }
-  function freshAcct() { return { cash: A.S.market.capital || 10000, start: A.S.market.capital || 10000, shares: 0, sym: null, pos: null, trades: [], acted: {} }; }
+  function freshAcct() { const b = watchBudget(); return { cash: b, start: b, shares: 0, sym: null, pos: null, trades: [], acted: {} }; }
+
+  // The most live watch puts into one purchase (and the pretend account's starting money).
+  const BKEY = 'tradinglab.watchBudget';
+  function watchBudget() {
+    const el = $('wBudget'), v = el && +el.value;
+    return v > 0 ? v : 10000;
+  }
+  function initWatchBudget() {
+    let v = null;
+    try { v = +localStorage.getItem(BKEY); } catch (e) { /* storage blocked */ }
+    $('wBudget').value = v > 0 ? v : 10000;
+    $('wBudget').addEventListener('change', () => {
+      const x = Math.max(1, Math.round(+$('wBudget').value || 10000));
+      $('wBudget').value = x;
+      try { localStorage.setItem(BKEY, String(x)); } catch (e) { /* storage blocked */ }
+      if (W) { log(`Budget changed to <b>${fmt.money(x)}</b>. It applies from the next purchase.`); renderWatchAccount(); }
+    });
+  }
   function saveAcct() {
     const today = nyDate();
     for (const k of Object.keys(acct.acted)) if (!k.startsWith(today)) delete acct.acted[k];
@@ -422,7 +440,7 @@
 
   function localBuy(d) {
     const fee = A.S.market.fee / 100, slip = A.S.market.slip / 100, px = W.last * (1 + slip);
-    const cost = acct.cash * d.risk.size;
+    const cost = Math.min(acct.cash, watchBudget()) * d.risk.size;
     acct.shares = cost * (1 - fee) / px; acct.cash -= cost; acct.sym = W.sym;
     acct.pos = { entryDay: todayDay(), entryPrice: px, peakHigh: px, peakClose: px };
     acct.trades.unshift({ side: 'buy', sym: W.sym, px, shares: acct.shares, time: new Date().toISOString() });
@@ -459,7 +477,7 @@
     W.busy = true;
     try {
       const a = await alp.account();
-      const budget = Math.min(+a.equity * d.risk.size, +a.buying_power);
+      const budget = Math.min(watchBudget() * d.risk.size, +a.cash);
       const qty = Math.floor(budget / W.last);
       if (qty < 1) { log(`Wanted to buy, but ${fmt.money(budget)} isn't enough for one share of ${esc(W.sym)}.`, 'err'); return; }
       const o = await TLAlpaca.buy(alp, W.sym, qty, W.last, d.risk);
@@ -484,13 +502,15 @@
     const el = $('wAccount');
     if (!W) return;
     if (W.dest === 'alpaca') {
-      el.innerHTML = W.alpPos ? `<div class="kv-grid"><div>Alpaca position<b>${W.alpPos.qty} sh</b></div><div>Bought at<b>${fmt.price(W.alpPos.entryPrice)}</b></div><div>Now<b class="${fmt.signClass(W.last - W.alpPos.entryPrice)}">${fmt.pct((W.last / W.alpPos.entryPrice - 1) * 100)}</b></div></div>` : `<p class="hint">No ${esc(W.sym)} position in your Alpaca practice account.</p>`;
+      const cap = `<p class="hint">Budget: the robot puts up to <b>${fmt.money(watchBudget())}</b> of your Alpaca practice money into each purchase.</p>`;
+      el.innerHTML = cap + (W.alpPos ? `<div class="kv-grid"><div>Alpaca position<b>${W.alpPos.qty} sh</b></div><div>Bought at<b>${fmt.price(W.alpPos.entryPrice)}</b></div><div>Now<b class="${fmt.signClass(W.last - W.alpPos.entryPrice)}">${fmt.pct((W.last / W.alpPos.entryPrice - 1) * 100)}</b></div></div>` : `<p class="hint">No ${esc(W.sym)} position in your Alpaca practice account.</p>`);
       return;
     }
     const val = acct.cash + (acct.shares > 0 ? acct.shares * (acct.sym === W.sym ? W.last : acct.pos.entryPrice) : 0);
     el.innerHTML = `<div class="kv-grid"><div>Pretend account<b>${fmt.money(val)}</b></div><div>Cash<b>${fmt.money(acct.cash)}</b></div>
       <div>Holding<b>${acct.shares > 0 ? acct.shares.toFixed(2) + ' ' + esc(acct.sym) : 'nothing'}</b></div>
       <div>Since start<b class="${fmt.signClass(val - acct.start)}">${fmt.pct((val / acct.start - 1) * 100, 2)}</b></div></div>
+      <p class="hint">Started with ${fmt.money(acct.start)}. Each purchase uses up to ${fmt.money(watchBudget())}${acct.start !== watchBudget() ? ' (press Reset pretend account to start over with your new budget)' : ''}.</p>
       ${acct.shares > 0 && acct.sym !== W.sym ? `<p class="warnline">The pretend account is holding ${esc(acct.sym)}, so it won't buy ${esc(W.sym)}. Watch ${esc(acct.sym)} or reset the account.</p>` : ''}`;
   }
 
@@ -534,55 +554,101 @@
     try { const r = await fetch(path + '?t=' + Date.now()); if (r.ok) return await r.json(); } catch (e) { /* none */ }
     return null;
   }
+  // A bot's budget: a dollar amount, or a share of the account. Older settings used "allocation" (%).
+  function budgetOf(bot) {
+    if (bot.budget != null) return { amount: +bot.budget, unit: bot.budgetType === 'pct' ? 'pct' : 'usd' };
+    return { amount: +bot.allocation || 0, unit: 'pct' };
+  }
+  const budgetText = (bot) => { const b = budgetOf(bot); return b.unit === 'pct' ? `up to ${b.amount}% of the account` : `up to ${fmt.money(b.amount)}`; };
+  function budgetField(bot) {
+    const b = bot ? budgetOf(bot) : { amount: 5000, unit: 'usd' };
+    const amount = h('input', { type: 'number', min: 1, step: 'any', value: b.amount, 'aria-label': 'Budget amount', style: 'width:110px' });
+    const unit = h('select', { 'aria-label': 'Budget unit' }, h('option', { value: 'usd' }, 'dollars'), h('option', { value: 'pct' }, '% of the account'));
+    unit.value = b.unit;
+    return { el: h('span', { class: 'btns', style: 'gap:6px' }, h('span', { class: 'muted' }, 'budget up to'), amount, unit), get: () => ({ budget: +amount.value, budgetType: unit.value }) };
+  }
+  // Check budgets add up, then write the settings for live/bot.json.
+  async function botSettingsOut(outEl, copyEl, bots, enabled) {
+    if (bots.some(x => !(x.budget > 0))) { A.toast('Every budget needs to be more than zero.'); return; }
+    const syms = bots.map(x => x.sym);
+    if (new Set(syms).size !== syms.length) { A.toast('Each bot needs a different stock: two bots on one stock would fight over it.'); return; }
+    const pct = bots.filter(x => x.budgetType === 'pct').reduce((t, x) => t + x.budget, 0);
+    if (pct > 100) { A.toast(`The % budgets add up to ${pct}%. Keep the total at 100% or less.`); return; }
+    const usd = bots.filter(x => x.budgetType === 'usd').reduce((t, x) => t + x.budget, 0);
+    let warn = '';
+    if (usd && alp) {
+      try { const acctNow = await alp.account(); if (usd > +acctNow.equity) warn = `Heads up: the dollar budgets add up to ${fmt.money(usd)}, more than the ${fmt.money(+acctNow.equity)} in your Alpaca practice account. A bot that runs out of cash skips the purchase.`; } catch (e) { /* not important */ }
+    }
+    const cfg = { enabled, note: 'Made in the Trading Lab. Set enabled to false to pause the bot. Each budget is the most that bot puts into one purchase, in dollars (usd) or as a percent of the account (pct).', bots };
+    outEl.value = JSON.stringify(cfg, null, 2);
+    outEl.classList.remove('hidden'); copyEl.classList.remove('hidden');
+    if (warn) A.toast(warn);
+  }
+  function copyButton(out) {
+    const copy = h('button', { class: 'btn hidden' }, 'Copy');
+    copy.onclick = async () => { try { await navigator.clipboard.writeText(out.value); A.toast('Copied. Now paste it into live/bot.json on GitHub.'); } catch (e) { out.select(); A.toast('Press Ctrl/Cmd+C to copy.'); } };
+    return copy;
+  }
+  const EDIT_URL = 'https://github.com/Just-Rice/trading-lab/edit/main/live/bot.json';
+
   async function renderBot() {
     const [cfg, logs] = await Promise.all([fetchRepoJSON('live/bot.json'), fetchRepoJSON('live/auto-log.json')]);
     const pill = $('botStatus'), body = $('botBody');
-    const on = cfg && cfg.enabled && cfg.bots && cfg.bots.length;
+    const has = cfg && cfg.bots && cfg.bots.length, on = has && cfg.enabled;
     pill.className = 'pill ' + (on ? 'ok' : '');
-    pill.textContent = on ? `On · ${cfg.bots.length} bot${cfg.bots.length > 1 ? 's' : ''}` : 'Off';
-    let html = on ? `<p><b>Running:</b> ${cfg.bots.map(b => `${esc(b.name)} (${esc(b.sym)}, up to ${b.allocation}% of the account)`).join('; ')}.</p>` : '<p class="hint">The bot is switched off. Follow the setup steps below to turn it on.</p>';
+    pill.textContent = on ? `On · ${cfg.bots.length} bot${cfg.bots.length > 1 ? 's' : ''}` : has ? 'Paused' : 'Off';
+    body.innerHTML = '';
+    if (has) {
+      // Change the running bot's budgets (or pause it) without starting over.
+      body.append(h('p', {}, h('b', {}, on ? 'Running: ' : 'Paused: '), cfg.bots.map(x => `${x.name} (${x.sym}, ${budgetText(x)})`).join('; ') + '.'));
+      const box = h('details', { class: 'setup' }, h('summary', {}, 'Change budgets or pause the bot'));
+      const fields = cfg.bots.map(x => ({ x, f: budgetField(x) }));
+      for (const { x, f } of fields) box.append(h('div', { class: 'bot-pick' }, h('b', { style: 'flex:1' }, `${x.name}`), f.el));
+      const enabled = h('input', { type: 'checkbox' }); enabled.checked = !!cfg.enabled;
+      box.append(h('label', { class: 'check', style: 'margin:10px 0' }, enabled, 'Bot switched on (untick to pause it; it keeps any shares it holds)'));
+      const out = h('textarea', { class: 'json hidden', readonly: true, 'aria-label': 'Updated bot settings' }), copy = copyButton(out);
+      const make = h('button', { class: 'btn primary' }, 'Make updated settings');
+      make.onclick = () => botSettingsOut(out, copy, fields.map(({ x, f }) => { const { allocation, ...rest } = x; return { ...rest, ...f.get() }; }), enabled.checked);
+      box.append(h('div', { class: 'btns', style: 'margin:10px 0' }, make, copy, h('a', { class: 'btn ghost', href: EDIT_URL, target: '_blank', rel: 'noopener' }, 'Open live/bot.json on GitHub ↗')), out,
+        h('p', { class: 'hint' }, 'Copy the updated settings, open live/bot.json on GitHub, replace everything in it, and press Commit changes. The new budget applies from the bot\'s next purchase; shares it already holds are not resized.'));
+      body.append(box);
+    } else body.append(h('p', { class: 'hint' }, 'The bot is switched off. Follow the setup steps below to turn it on.'));
     const list = Array.isArray(logs) ? logs.slice(0, 40) : [];
-    html += '<h3 class="sub">What the bot did</h3>';
-    html += list.length ? `<div class="tbl-wrap"><table class="data"><thead><tr><th class="l">When</th><th class="l">Bot</th><th class="l">Action</th><th>Qty</th><th>Price</th><th class="l">Why</th></tr></thead><tbody>${list.map(e => `<tr><td class="l">${new Date(e.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td class="l">${esc(e.name || '')} <span class="muted">${esc(e.sym || '')}</span></td><td class="l ${e.action === 'buy' ? 'up' : e.action === 'sell' || e.action === 'error' ? 'down' : ''}">${esc(e.action)}</td><td>${e.qty || ''}</td><td>${e.price ? fmt.price(e.price) : ''}</td><td class="l" style="white-space:normal;min-width:200px">${esc(e.why || e.note || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">No runs yet.</p>';
-    body.innerHTML = html;
+    const logBox = h('div');
+    logBox.innerHTML = '<h3 class="sub">What the bot did</h3>' + (list.length ? `<div class="tbl-wrap"><table class="data"><thead><tr><th class="l">When</th><th class="l">Bot</th><th class="l">Action</th><th>Qty</th><th>Price</th><th class="l">Why</th></tr></thead><tbody>${list.map(e => `<tr><td class="l">${new Date(e.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td class="l">${esc(e.name || '')} <span class="muted">${esc(e.sym || '')}</span></td><td class="l ${e.action === 'buy' ? 'up' : e.action === 'sell' || e.action === 'error' ? 'down' : ''}">${esc(e.action)}</td><td>${e.qty || ''}</td><td>${e.price ? fmt.price(e.price) : ''}</td><td class="l" style="white-space:normal;min-width:200px">${esc(e.why || e.note || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">No runs yet.</p>');
+    body.append(logBox);
   }
   function renderBotMaker() {
     const el = $('botMaker');
     el.innerHTML = '';
     if (!A.S.forward.length) { el.append(h('p', { class: 'hint' }, 'First lock in at least one forward test (the bot runs forward tests, so their settings are frozen).')); return; }
+    el.append(h('p', { class: 'hint' }, 'The budget is the most each bot puts into one purchase, in dollars or as a share of your Alpaca account. The strategy\'s "money per trade" setting then applies to that budget.'));
     const picks = [];
     for (const f of A.S.forward) {
-      const cb = h('input', { type: 'checkbox' }), pct = h('input', { type: 'number', min: 1, max: 100, value: Math.floor(100 / Math.min(A.S.forward.length, 4)) });
-      picks.push({ f, cb, pct });
-      el.append(h('label', { class: 'bot-pick' }, cb, h('b', { style: 'flex:1' }, f.name), h('span', { class: 'muted' }, 'up to'), pct, h('span', { class: 'muted' }, '% of the account')));
+      const cb = h('input', { type: 'checkbox', 'aria-label': 'Include ' + f.name }), bf = budgetField(null);
+      picks.push({ f, cb, bf });
+      el.append(h('div', { class: 'bot-pick' }, h('label', { class: 'check', style: 'flex:1' }, cb, h('b', {}, f.name)), bf.el));
     }
-    const out = h('textarea', { class: 'json hidden', readonly: true, 'aria-label': 'Bot settings' });
-    const copy = h('button', { class: 'btn hidden' }, 'Copy');
-    copy.onclick = async () => { try { await navigator.clipboard.writeText(out.value); A.toast('Copied. Now paste it into live/bot.json on GitHub.'); } catch (e) { out.select(); A.toast('Press Ctrl/Cmd+C to copy.'); } };
+    const out = h('textarea', { class: 'json hidden', readonly: true, 'aria-label': 'Bot settings' }), copy = copyButton(out);
     const make = h('button', { class: 'btn primary' }, 'Make bot settings');
     make.onclick = () => {
       const chosen = picks.filter(p => p.cb.checked);
       if (!chosen.length) { A.toast('Tick at least one forward test.'); return; }
-      const syms = chosen.map(p => p.f.sym);
-      if (new Set(syms).size !== syms.length) { A.toast('Each bot needs a different stock: two bots on one stock would fight over it.'); return; }
-      const total = chosen.reduce((a, p) => a + (+p.pct.value || 0), 0);
-      if (total > 100) { A.toast(`Those add up to ${total}%. Keep the total at 100% or less.`); return; }
-      const cfg = { enabled: true, note: 'Made in the Trading Lab. Set "enabled" to false to pause the bot.', bots: chosen.map(p => ({ name: p.f.name, sym: p.f.sym, allocation: +p.pct.value, strategy: p.f.strat })) };
-      out.value = JSON.stringify(cfg, null, 2);
-      out.classList.remove('hidden'); copy.classList.remove('hidden');
+      botSettingsOut(out, copy, chosen.map(p => ({ name: p.f.name, sym: p.f.sym, ...p.bf.get(), strategy: p.f.strat })), true);
     };
     el.append(h('div', { class: 'btns', style: 'margin:10px 0' }, make, copy), out);
   }
 
   /* ---------- boot ---------- */
   function boot() {
-    initKeys(); initFinnhub(); pickDefaultSource();
+    initKeys(); initFinnhub(); pickDefaultSource(); initWatchBudget();
+    if (acct.trades.length === 0 && acct.shares === 0 && acct.start !== watchBudget()) { acct = freshAcct(); saveAcct(); }
     $('wSrc').addEventListener('change', () => { $('wSrc').dataset.touched = '1'; });
     fillAlgoSelect(); fillSymSelect();
     $('wAlgo').onchange = () => { const a = chosenAlgo(); if (a && a.sym) $('wSym').value = a.sym; };
     $('wStart').onclick = startWatch;
     $('wStop').onclick = () => stopWatch();
-    $('wReset').onclick = () => { acct = freshAcct(); saveAcct(); renderWatchAccount(); A.toast('Pretend account reset.'); };
+    $('wReset').onclick = () => { acct = freshAcct(); saveAcct(); renderWatchAccount(); A.toast(`Pretend account reset to ${fmt.money(acct.start)}.`); };
     $('acctRefresh').onclick = () => alp ? refreshAccount() : A.toast('Connect your Alpaca key first.');
     const orig = document.querySelector('[data-tab=live]');
     orig.addEventListener('click', () => { renderForward(); renderBot(); fillAlgoSelect(); if (alp) refreshAccount(); refreshClock(); });

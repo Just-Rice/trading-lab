@@ -19,7 +19,7 @@ It's plain HTML, CSS and JavaScript, with no build step and no server. Charts us
   1. **Forward tests** lock an algorithm's settings and score it only on days after the lock.
   2. **Live watch** streams real prices during market hours from a free [Finnhub](https://finnhub.io) key or your Alpaca account. The robot decides on "today so far". Keys are typed into the page and stay in the browser.
   3. **Alpaca practice account:** live watch can send its orders to your free Alpaca paper account instead of a pretend one.
-  4. **Automatic daily bot:** a GitHub Action trades your locked-in algorithms on the Alpaca paper account every weekday.
+  4. **Automatic daily bot:** a GitHub Action trades your locked-in algorithms on the Alpaca paper account every weekday. Each bot has a budget, in dollars or as a % of the account, which can be changed later from the Live tab.
 
 ## How the simulation works
 

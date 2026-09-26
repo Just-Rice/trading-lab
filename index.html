@@ -189,6 +189,7 @@
         <label class="fld"><span>Stock</span><select id="wSym"></select></label>
         <label class="fld"><span>Live prices from</span>
           <select id="wSrc"><option value="finnhub">Finnhub</option><option value="alpaca">Alpaca</option></select></label>
+        <label class="fld" title="The most the robot puts into one purchase. For the pretend account it is also the starting money when you reset it."><span>Budget $</span><input type="number" id="wBudget" min="1" step="100" value="10000"></label>
         <label class="fld"><span>Orders go to</span>
           <select id="wDest"><option value="local">Pretend account in this browser</option><option value="alpaca">My Alpaca practice account</option></select></label>
       </div>
@@ -224,7 +225,7 @@
         <ol>
           <li><b>Store your keys in GitHub's locked storage.</b> Open <a href="https://github.com/Just-Rice/trading-lab/settings/secrets/actions" target="_blank" rel="noopener">the repository's secrets page</a>, press <b>New repository secret</b> and add two:
             <code>ALPACA_KEY_ID</code> (your Key ID) and <code>ALPACA_SECRET_KEY</code> (your secret key). Nobody else can read these, not even on the public repository.</li>
-          <li><b>Choose what the bot trades.</b> Pick forward tests below and how much of the account each may use, then press <b>Make bot settings</b>.</li>
+          <li><b>Choose what the bot trades.</b> Pick forward tests below and give each a budget (dollars, or a share of the account), then press <b>Make bot settings</b>. You can change budgets later without starting over.</li>
           <li><b>Paste the settings into GitHub.</b> Press <b>Copy</b>, open <a href="https://github.com/Just-Rice/trading-lab/edit/main/live/bot.json" target="_blank" rel="noopener">live/bot.json on GitHub</a>, replace everything with what you copied, and press <b>Commit changes</b>.</li>
           <li>Done. To try it straight away during market hours, open <a href="https://github.com/Just-Rice/trading-lab/actions/workflows/auto-trade.yml" target="_blank" rel="noopener">the bot's page on GitHub</a> and press <b>Run workflow</b>.</li>
         </ol>

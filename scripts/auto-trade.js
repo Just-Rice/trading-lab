@@ -42,6 +42,13 @@ async function prices(sym) {
   return TL.makeSeries(raw);
 }
 
+// The most a bot may put into one purchase: dollars, or % of the account ("pct").
+// Older settings used "allocation" as a % of the account.
+function budgetFor(bot, equity) {
+  if (bot.budget != null) return bot.budgetType === 'pct' ? equity * bot.budget / 100 : +bot.budget;
+  return equity * (+bot.allocation || 0) / 100;
+}
+
 async function main() {
   const cfg = readJSON('live/bot.json', { enabled: false, bots: [] });
   const log = readJSON('live/auto-log.json', []);
@@ -75,7 +82,7 @@ async function main() {
       if (d.action === 'buy' && !pos) {
         const snap = await c.snapshot(bot.sym);
         const px = (snap.latestTrade && snap.latestTrade.p) || lastClose;
-        const budget = Math.min(equity * (bot.allocation / 100) * d.risk.size, +account.cash);
+        const budget = Math.min(budgetFor(bot, equity) * d.risk.size, +account.cash);
         const qty = Math.floor(budget / px);
         if (qty < 1) { add({ ...base, action: 'note', note: `Buy signal, but ${budget.toFixed(2)} dollars is not enough for one share.` }); continue; }
         const o = await TLAlpaca.buy(c, bot.sym, qty, px, d.risk);
