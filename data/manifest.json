@@ -1,5 +1,5 @@
 {
- "updated": "2026-09-30T01:24:44Z",
+ "updated": "2026-09-30T19:22:32Z",
  "tickers": [
   {
    "s": "SPY",
@@ -491,6 +491,36 @@
    "from": "2000-01-03",
    "to": "2026-09-29",
    "rows": 6725
+  },
+  {
+   "s": "USMKT",
+   "n": "US stock market since 1926 (research data)",
+   "g": "Long history (since 1926)",
+   "from": "1926-07-01",
+   "to": "2026-09-29",
+   "rows": 26337,
+   "researchUntil": "2026-08-31",
+   "closeOnly": true
+  },
+  {
+   "s": "USTB",
+   "n": "US Treasury bills since 1926 (research data)",
+   "g": "Long history (since 1926)",
+   "from": "1926-07-01",
+   "to": "2026-09-29",
+   "rows": 26337,
+   "researchUntil": "2026-08-31",
+   "closeOnly": true
+  },
+  {
+   "s": "USMKT2X",
+   "n": "2x US stock market since 1926 (simulated)",
+   "g": "Long history (since 1926)",
+   "from": "1926-07-01",
+   "to": "2026-09-29",
+   "rows": 26337,
+   "researchUntil": "2026-08-31",
+   "closeOnly": true
   }
  ]
 }

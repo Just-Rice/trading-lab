@@ -68,7 +68,23 @@ async function runPortfolio(bot, c, account, state, add, today) {
   const map = {};
   for (const sym of [...new Set(['SPY', ...funds])]) map[sym] = await prices(sym);
   const U = TL.alignUniverse(map, 'SPY');
-  const target = TL.decidePortfolio(U, st).weights;
+  let target = TL.decidePortfolio(U, st).weights;
+  // Crash trigger (boost bots): real stop orders at Alpaca sell the stock positions if the S&P 500
+  // falls guard% in a day. If they fired since the last run, stay in the safe fund for the cooling-off days.
+  const guard = st.mode === 'leverage' ? TL.val(st, st.guard) || 0 : 0;
+  const levSyms = [st.base || 'SPY', st.lev || 'SSO'];
+  if (guard > 0) {
+    const heldNow = new Set((await c.positions() || []).map(p => p.symbol));
+    if (ps.weights && levSyms.some(x => (ps.weights[x] || 0) > 0) && !levSyms.some(x => heldNow.has(x))) {
+      ps.guardUntil = today + Math.ceil((TL.val(st, st.cool) || 0) * 1.4) + 1;
+      add({ ...base, action: 'note', note: 'The crash trigger sold the stock positions since the last run.' });
+    }
+    if (ps.guardUntil && today <= ps.guardUntil) target = { [st.safe || 'cash']: 1 };
+  }
+  if (guard > 0 || ps.guardUntil) {
+    // cancel yesterday's protective stops first, so they don't hold on to shares we need to trade
+    for (const o of (await c.orders('open', 100)) || []) if (levSyms.includes(o.symbol) && o.type === 'stop' && o.side === 'sell') { try { await c.cancelOrder(o.id); } catch (e) { /* gone */ } }
+  }
   const budget = budgetFor(bot, +account.equity);
   const positions = await c.positions(), held = {};
   for (const p of positions || []) if (funds.includes(p.symbol)) held[p.symbol] = p;
@@ -97,9 +113,21 @@ async function runPortfolio(bot, c, account, state, add, today) {
     cash -= qty * p.px;
     add({ ...base, action: 'buy', qty, price: p.px, why: `Bring ${p.sym} up to ${((target[p.sym] || 0) * 100).toFixed(0)}% of the portfolio.` });
   }
+  if (guard > 0) {
+    // fresh protective stops, based on the latest close
+    await new Promise(r => setTimeout(r, 1500));
+    for (const p of (await c.positions()) || []) {
+      if (!levSyms.includes(p.symbol)) continue;
+      const beta = p.symbol === (st.lev || 'SSO') ? (st.levX || 2) : 1;
+      const lastClose = U.series[p.symbol] ? U.series[p.symbol].close[U.series[p.symbol].n - 1] : +p.current_price;
+      const stop = Math.round(lastClose * (1 - beta * guard / 100) * 100) / 100;
+      await c.submitOrder({ symbol: p.symbol, qty: String(Math.floor(+p.qty)), side: 'sell', type: 'stop', stop_price: String(stop), time_in_force: 'gtc' });
+      add({ ...base, action: 'note', note: `Crash trigger set: sell ${p.symbol} if it falls to ${stop.toFixed(2)}.` });
+    }
+  }
   const mix = Object.entries(target).filter(([, v]) => v > 0.0001).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k === 'cash' ? 'cash' : k} ${(v * 100).toFixed(0)}%`).join(', ');
   add({ ...base, action: 'rebalance', why: `New mix for ${key}: ${mix}.` });
-  state.__portfolio = { key, name: bot.name, weights: target, day: today };
+  state.__portfolio = { key, name: bot.name, weights: target, day: today, guardUntil: ps.guardUntil };
 }
 
 async function main() {
@@ -107,6 +135,7 @@ async function main() {
   const log = readJSON('live/auto-log.json', []);
   const state = readJSON('live/auto-state.json', {});
   const add = (e) => { log.unshift({ time: new Date().toISOString(), ...e }); console.log(JSON.stringify(e)); };
+  const runStart = new Date().toISOString();
 
   if (!cfg.enabled || !(cfg.bots || []).length) { console.log('The bot is switched off in live/bot.json. Nothing to do.'); return; }
   const key = process.env.ALPACA_KEY_ID, secret = process.env.ALPACA_SECRET_KEY;
@@ -155,6 +184,14 @@ async function main() {
     } catch (e) {
       add({ ...base, action: 'error', note: e.message });
     }
+  }
+  // Phone alert (ntfy.sh) when the bot did something worth knowing about.
+  const topic = process.env.NTFY_TOPIC;
+  const news = log.filter(e => e.time >= runStart && ['buy', 'sell', 'rebalance', 'error'].includes(e.action) || (e.time >= runStart && /crash trigger/i.test(e.note || '')));
+  if (topic && news.length) {
+    const body = news.map(e => `${e.action.toUpperCase()} ${e.sym || ''}${e.qty ? ' ' + e.qty + ' sh' : ''}${e.price ? ' @ ' + (+e.price).toFixed(2) : ''}: ${e.why || e.note || ''}`).join('\n').slice(0, 3500);
+    try { await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', body, headers: { Title: 'Trading Lab daily bot', Tags: news.some(e => e.action === 'error') ? 'warning' : 'chart_with_upwards_trend' } }); }
+    catch (e) { console.log('Alert failed: ' + e.message); }
   }
   writeJSON('live/auto-log.json', log.slice(0, 500));
   writeJSON('live/auto-state.json', state);

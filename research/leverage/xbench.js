@@ -22,14 +22,24 @@ function simulate(expo, period, opt = {}) {
   const cost = { ...COST, ...(opt.cost || {}) };
   let eq = 1, peak = 1, mdd = 0, sum = 0, sum2 = 0, n = 0, held = expo(from - 2) || 0, turn = 0, prevDecision = held;
   const curve = opt.curve ? new Float64Array(to - from + 1) : null;
+  let guardUntil = -1;
   let expSum = 0;
   for (let i = from; i <= to; i++) {
     const want = expo(i - 2); // decided two closes ago, traded yesterday at the close
-    const e = Number.isFinite(want) ? want : held;
+    let e = Number.isFinite(want) ? want : held;
+    if (guardUntil >= i) e = Math.min(e, opt.guard.floor || 0); // crash guard cooling off
     const tradeCost = Math.abs(e - held) * cost.trade;
     turn += Math.abs(e - held); held = e;
     const rf = D.rf[i], m = D.mkt[i];
     let r = e * m + (1 - e) * rf;
+    // Crash guard: if the market falls g% in a day, the boost is cut at the trigger (filled 1% worse),
+    // and it stays cut for the cooling-off days. Daily data has no intraday low, so the fill is pessimistic.
+    if (opt.guard && e > (opt.guard.floor || 0) && m <= -opt.guard.g / 100) {
+      const f = opt.guard.floor || 0, hit = -(opt.guard.g + 1) / 100;
+      r = e * hit + (1 - e) * rf + f * (m - hit);
+      guardUntil = i + (opt.guard.cool || 0) + 2;
+      turn += e - f; r -= (e - f) * cost.trade; held = f;
+    }
     if (e > 1) r -= ((e - 1) * cost.spread + Math.min(1, e - 1) * cost.levFee) / 252;
     r -= tradeCost;
     eq *= 1 + r; if (curve) curve[i - from] = eq;

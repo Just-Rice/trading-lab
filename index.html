@@ -33,6 +33,7 @@
   <button role="tab" data-tab="custom">Build your own</button>
   <button role="tab" data-tab="saved">Saved</button>
   <button role="tab" data-tab="live">Go live</button>
+  <button role="tab" data-tab="game">Play</button>
   <button role="tab" data-tab="guide">Help</button>
 </nav>
 
@@ -61,6 +62,12 @@
         <b>Build your own</b>
         <span>Write your own buy and sell rules from simple building blocks, like "buy when the price rises above its 200-day average".</span>
         <span class="choice-go">Open the builder →</span>
+      </button>
+      <button class="choice" data-go="game">
+        <span class="choice-kicker">Game</span>
+        <b>Beat the robot</b>
+        <span>Trade a hidden stretch of real history day by day, like the 1929 crash or 2008, against a robot and just holding. Can you do better?</span>
+        <span class="choice-go">Play →</span>
       </button>
       <button class="choice" data-go="live">
         <span class="choice-kicker">Today's prices</span>
@@ -94,6 +101,11 @@
         <option value="10">Last 10 years</option>
         <option value="5">Last 5 years</option>
         <option value="3">Last 3 years</option>
+        <optgroup label="Long history (choose a 'since 1926' series)">
+          <option value="dep">1928–1949: Great Depression and war</option>
+          <option value="seventies">1966–1982: the inflation years</option>
+          <option value="post">1950–2000: the post-war boom</option>
+        </optgroup>
         <option value="custom">Pick dates…</option>
       </select>
     </label>
@@ -106,6 +118,12 @@
         <label class="fld" title="Commission charged on every buy and every sell"><span>Fee per trade %</span><input type="number" id="mFee" min="0" max="5" step="0.01" value="0.05"></label>
         <label class="fld" title="How much worse than the quoted price your order fills"><span>Price slippage %</span><input type="number" id="mSlip" min="0" max="5" step="0.01" value="0.05"></label>
       </div>
+      <div class="more-grid tax-row">
+        <label class="check"><input type="checkbox" id="mTaxOn"> Include estimated US tax on gains</label>
+        <label class="fld"><span>Short-term rate % (held under a year)</span><input type="number" id="mTaxSt" min="0" max="60" step="1" value="24"></label>
+        <label class="fld"><span>Long-term rate % (held a year or more)</span><input type="number" id="mTaxLt" min="0" max="40" step="1" value="15"></label>
+      </div>
+      <p class="hint">Tax is estimated each year on sales, with losses offsetting gains. Just holding is taxed once, as if sold at the end. It isn't tax advice: real rates depend on your income and state.</p>
     </details>
   </section>
 
@@ -215,6 +233,39 @@
     </div>
   </section>
 
+  <!-- GAME -->
+  <section class="tab-panel hidden" id="tab-game" role="tabpanel">
+    <div class="card" id="gSetup">
+      <h2>Beat the robot</h2>
+      <p>You get a hidden stretch of real market history. Each day, decide whether to be invested or in cash. Your orders fill at the next day's price, just like the robots'. You start with $10,000 in cash. The dates and the name stay secret until the end, and prices are scaled to start at 100.</p>
+      <div class="row3">
+        <label class="fld"><span>Challenge</span><select id="gMode"><option value="random">A random stretch of history</option><option value="crash">A famous crash</option></select></label>
+        <label class="fld"><span>Length (random stretches)</span><select id="gLen"><option value="126">6 months</option><option value="252" selected>1 year</option><option value="504">2 years</option></select></label>
+        <label class="fld"><span>Your opponent</span><select id="gRobot"></select></label>
+      </div>
+      <button class="btn primary big" id="gStart">Start</button>
+      <p class="hint" id="gStats"></p>
+    </div>
+    <div class="card hidden" id="gPlay">
+      <div class="card-head"><h2 id="gDay">Day 0</h2><span class="muted" id="gPos"></span></div>
+      <div class="tiles main">
+        <div class="tile"><div class="lab">You</div><div class="val" id="gYou">$10,000</div></div>
+        <div class="tile"><div class="lab">The robot</div><div class="val" id="gRobotM">$10,000</div><div class="cmp">Its trades are a secret until the end</div></div>
+        <div class="tile"><div class="lab">Just holding</div><div class="val" id="gHold">$10,000</div></div>
+      </div>
+      <div class="chart chart-lg" id="gChart"></div>
+      <div class="btns game-btns">
+        <button class="btn primary" id="gBuy">Buy (B)</button>
+        <button class="btn danger-solid" id="gSell">Sell (S)</button>
+        <button class="btn" id="gNext">Next day (→)</button>
+        <button class="btn" id="gAuto">▶ Play</button>
+        <label class="muted">Speed <select id="gSpeed"><option value="2">Slow</option><option value="5" selected>Normal</option><option value="12">Fast</option></select></label>
+      </div>
+      <p class="hint">Keys: B to buy, S to sell, → for the next day, space to play or pause.</p>
+      <div id="gEnd" class="hidden"></div>
+    </div>
+  </section>
+
   <!-- GO LIVE -->
   <section class="tab-panel hidden" id="tab-live" role="tabpanel">
     <div class="card live-intro">
@@ -225,6 +276,12 @@
         <a href="#watchCard" class="jump-link"><b>2. Watch live</b><span>Follow real prices during market hours. Needs a free price key.</span></a>
         <a href="#botCard" class="jump-link"><b>3. Daily bot</b><span>Trades a free practice account every weekday, even with your computer off.</span></a>
       </div>
+    </div>
+
+    <div class="card kill" id="killCard">
+      <div class="card-head"><h2>Stop everything</h2><button class="btn danger-solid" id="killBtn">Stop everything</button></div>
+      <p class="hint">One button for when you want it all to stop: it stops Live watch, and (if Alpaca is connected) cancels every open order and sells everything in your Alpaca practice account. Then it shows the one change that pauses the daily bot.</p>
+      <div id="killOut"></div>
     </div>
 
     <div class="card" id="fwdCard">
@@ -285,6 +342,23 @@
         </ol>
         <div id="botMaker"></div>
       </details>
+    </div>
+
+    <div class="card" id="alertsCard">
+      <div class="card-head"><h2>Alerts on your phone</h2><span class="pill" id="ntfyStatus">Off</span></div>
+      <p class="hint">Get a notification whenever a robot trades. It uses <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>, a free notification app with no sign-up.</p>
+      <ol class="steps-inline">
+        <li>Install the <b>ntfy</b> app (App Store or Google Play), or open <a href="https://ntfy.sh/app" target="_blank" rel="noopener">ntfy.sh/app</a> in a browser.</li>
+        <li>Press <b>Make a private channel name</b> below. Anyone who knows the name can read the alerts, so keep it to yourself.</li>
+        <li>In the app, press <b>+</b> and subscribe to that exact name, then press <b>Send a test</b>.</li>
+        <li>For the daily bot: add it as a GitHub secret named <code>NTFY_TOPIC</code> on <a href="https://github.com/Just-Rice/trading-lab/settings/secrets/actions" target="_blank" rel="noopener">the secrets page</a>.</li>
+      </ol>
+      <div class="row3">
+        <label class="fld grow"><span>Channel name</span><input id="ntfyTopic" autocomplete="off" spellcheck="false" placeholder="tradinglab-…"></label>
+        <div class="fld actions-end"><div class="btns"><button class="btn" id="ntfyMake">Make a private channel name</button><button class="btn primary" id="ntfyTest">Send a test</button></div></div>
+      </div>
+      <label class="check"><input type="checkbox" id="ntfyWatch" checked> Also alert me when Live watch trades</label>
+      <p class="hint" id="ntfyMsg"></p>
     </div>
 
     <div class="card" id="accountsCard">
@@ -468,6 +542,21 @@
         <li><b>None of them beat holding in 2021–2026.</b> All of them lose more than holding in some years: the leveraged robots lost 25–32% in 2000, and Moderate lost 35% in 2022.</li>
       </ul>
       <p><b>About real leveraged funds.</b> 2x and 3x funds reset every day, so over long choppy stretches they can lose even when the market ends up flat. They are built for short-term trading. On this site their history before 2006 (2x) and 2009 (3x) is simulated from the S&amp;P 500 fund and T-bill rates, with the real funds' costs. Idle money in these robots earns T-bill interest through a Treasury-bill fund (BIL), simulated before 2007.</p>
+      <h3 id="trigger">The crash trigger (for boost bots)</h3>
+      <p>The boost bots' trend switch only looks at closing prices, so a crash that happens within a single day can hit before it reacts. That's what sank the 2x bot on Black Monday 1987. The optional <b>crash trigger</b> sells the stock positions the moment the S&amp;P 500 falls a set amount below the previous close. The daily bot does this with real stop orders at Alpaca, refreshed every morning.</p>
+      <ul>
+        <li><b>The design years couldn't choose a setting.</b> From 2001 to 2020, no 6% one-day fall ever happened while a bot was boosted, and lower triggers (3–5%) fired on ordinary rough days and cost money.</li>
+        <li><b>On older years it helped a lot.</b> In 1950–2000, a 6% trigger cut Moderate 2x's worst drop from 57% to 44%, and Gentle's from 47% to 36%. Over August–December 1987, Moderate lost 31% instead of 48%. Those years had been seen once before, so this is supporting evidence rather than a clean exam. They only have one price a day, so the test assumed the sale filled 1% worse than the trigger.</li>
+        <li><b>On the site's real daily highs and lows (2001–2026) it cost a little.</b> On 6 May 2010, the "Flash Crash", the market plunged 10% within minutes and recovered to close 3% down, and the trigger sold near the bottom. On 9 March 2020 it helped: the market fell another 18% over the next 10 days.</li>
+        <li>A 6% one-day fall happened on only 35 days between 1926 and 2026, almost all in real crises. The trigger is off by default because the evidence is mixed; switch it on in a boost bot's settings.</li>
+      </ul>
+      <h3 id="tools">Tools for honest testing</h3>
+      <ul>
+        <li><b>History back to 1926.</b> Pick <i>US stock market since 1926</i> in the stock list, or <i>Whole US market since 1926</i> for a boost bot, then choose an era like the Great Depression in "Years to test". It is Ken French's research data (the whole US market, with dividends), continued with the S&amp;P 500 fund after the research data ends. It has one price per day, so trades happen at the next day's close. Over 1928–2026 the Crash shield grew 10.2% a year against 10.0% for holding, with a worst drop of 54% against 84%.</li>
+        <li><b>Taxes.</b> Under "Money and costs", switch on estimated US tax. Gains held under a year are taxed at the short-term rate, the rest at the long-term rate. Losses offset gains, and tax is paid each year end. Just holding is taxed once, as if sold at the end, which is why trading robots usually fall further behind after tax. For example, the Crash shield on SPY drops from about $85,000 to $65,000 after tax. It is an estimate, not tax advice.</li>
+        <li><b>How much was luck?</b> Under any result, this runs the robot and just holding through 300 alternative histories. Each keeps every real day but shuffles year-long chunks into a new order. If a robot only wins in the real order, the win may have been luck. The Crash shield on SPY ended with more money than holding in about a quarter of them, and had a smaller worst drop in about 85%: crash insurance, not a money-maker. Shuffling breaks up some long trends, so trend robots look a little worse here than in real markets.</li>
+        <li><b>Beat the robot</b> (the Play tab). Trade a hidden stretch of history yourself and see whether you do better than a robot and just holding.</li>
+      </ul>
       <h3>Honest limits</h3>
       <ul>
         <li><b>Survivorship bias</b>: the stock list is made of companies that are big and successful <i>today</i>. A strategy tested on Nvidia or Apple benefits from knowing they survived. Index funds like SPY avoid most of this.</li>
@@ -492,6 +581,7 @@
 <script src="js/builder.js"></script>
 <script src="js/app.js"></script>
 <script src="js/portfolio.js"></script>
+<script src="js/game.js"></script>
 <script src="js/live.js"></script>
 </body>
 </html>

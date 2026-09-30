@@ -86,10 +86,16 @@
           <div class="legend r-mlegend"></div>
           <div class="chart chart-sm r-mchart"></div>
           <details class="fold trades"><summary class="r-tsum">Every trade</summary><div class="tbl-wrap r-trades"></div></details>
+          <div class="r-luck"></div>
         </div>`;
       const q = (c) => root.querySelector(c);
       this.el = { title: q('.r-title'), sub: q('.r-sub'), summary: q('.r-summary'), more: q('.r-more'), tiles: q('.r-tiles'), play: q('.r-play'), speed: q('.r-speed'), scrub: q('.r-scrub'), read: q('.r-read'), exit: q('.r-exit'), log: q('.r-log'), candles: q('.r-candles'), plegend: q('.r-plegend'), mlegend: q('.r-mlegend'), pchart: q('.r-pchart'), mchart: q('.r-mchart'), tsum: q('.r-tsum'), trades: q('.r-trades') };
       this.replay = { on: false, playing: false, k: 0, raf: 0 };
+      luckPanel(root.querySelector('.r-luck'), async () => {
+        const c = this.ctx; if (!c) return null;
+        const raw = await TLApp.loadRaw(c.series.sym);
+        return { kind: 'stock', raw: { s: raw.s, t: raw.t, o: raw.o, h: raw.h, l: raw.l, c: raw.c, v: raw.v }, strategy: c.strat, opt: { from: c.from, to: c.to, capital: c.capital, fee: c.fee, slip: c.slip, tax: c.tax } };
+      });
       this.el.play.onclick = () => this.togglePlay();
       this.el.exit.onclick = () => this.exitReplay();
       this.el.scrub.oninput = () => { this.pause(); this.enterReplay(+this.el.scrub.value); };
@@ -110,7 +116,7 @@
       this.exitReplay(true);
       this.ctx = ctx;
       const { series: s, strat } = ctx;
-      const opt = { from: ctx.from, to: ctx.to, capital: ctx.capital, fee: ctx.fee, slip: ctx.slip };
+      const opt = { from: ctx.from, to: ctx.to, capital: ctx.capital, fee: ctx.fee, slip: ctx.slip, tax: ctx.tax };
       const res = TL.backtest(s, strat, opt);
       const bh = TL.buyHoldCurve(s, res.from, res.to, ctx.capital);
       const bhStats = TL.curveStats(bh, res.metrics.years);
@@ -128,14 +134,16 @@
 
     renderTiles() {
       const m = this.res.metrics, b = this.bhStats, cap = this.ctx.capital, sym = this.ctx.series.sym;
-      const bhFinal = cap * (1 + b.totalReturn / 100);
+      const bhFinal = TL.afterTaxHold(cap * (1 + b.totalReturn / 100), cap, m.years, this.ctx.tax);
+      const bhCagr = (Math.pow(bhFinal / cap, 1 / m.years) - 1) * 100;
       const ahead = m.final >= bhFinal;
-      this.el.summary.innerHTML = `Over ${m.years.toFixed(0)} years, this robot turned ${fmt.money(cap)} into <b class="${ahead ? 'up' : 'down'}">${fmt.money(m.final)}</b>. Just holding ${esc(sym)} would have made ${fmt.money(bhFinal)}. Its worst drop was ${fmt.pctPlain(m.maxDD, 0)} (holding: ${fmt.pctPlain(b.maxDD, 0)}).`;
+      const meta = window.TLApp && TLApp.metaOf(sym);
+      this.el.summary.innerHTML = `Over ${m.years.toFixed(0)} years, this robot turned ${fmt.money(cap)} into <b class="${ahead ? 'up' : 'down'}">${fmt.money(m.final)}</b>. Just holding ${sym === 'USMKT' ? 'the US market' : esc(sym)} would have made ${fmt.money(bhFinal)}. Its worst drop was ${fmt.pctPlain(m.maxDD, 0)} (holding: ${fmt.pctPlain(b.maxDD, 0)}).${this.ctx.tax ? ` <span class="muted">After estimated tax: the robot paid ${fmt.money(m.taxPaid)}; holding is taxed once at the end.</span>` : ''}${meta && meta.closeOnly ? ` <span class="muted">This long-history series has one price a day, so trades happen at the next day's close.</span>` : ''}`;
       const vs = (bb, better) => `<div class="cmp">Just holding: ${bb}${better == null ? '' : better ? ' · <span class="up">▲ robot ahead</span>' : ' · <span class="down">▼ robot behind</span>'}</div>`;
       const tile = ([l, v, c]) => `<div class="tile"><div class="lab">${l}</div><div class="val">${v}</div>${c}</div>`;
       this.el.tiles.innerHTML = [
         ['Money at the end', fmt.money(m.final), vs(fmt.money(bhFinal), ahead)],
-        ['Growth per year', fmt.pct(m.cagr), vs(fmt.pct(b.cagr), m.cagr > b.cagr)],
+        ['Growth per year', fmt.pct(m.cagr), vs(fmt.pct(bhCagr), m.cagr > bhCagr)],
         ['Worst drop', fmt.pctPlain(m.maxDD), vs(fmt.pctPlain(b.maxDD), m.maxDD < b.maxDD)],
       ].map(tile).join('');
       this.el.more.innerHTML = [
@@ -343,6 +351,57 @@
     }
   }
 
+  /* ---------- "how much was luck?" panel ----------
+   * makeJob() returns the worker message (without n and block); the panel runs it and draws the answer. */
+  function luckPanel(el, makeJob) {
+    el.innerHTML = `<details class="fold luck"><summary>How much was luck? (stress test)</summary>
+      <p class="hint">This builds hundreds of alternative histories from the same years: every real day is kept, but year-long chunks are shuffled into a new order. The robot and just holding both run through each one. If the robot only wins in the order things really happened, its win may have been luck. Trend-following robots look a little worse here than in real markets, because shuffling breaks up some long trends.</p>
+      <div class="btns"><button class="btn primary l-run">Run 300 alternative histories</button><span class="muted l-prog"></span></div>
+      <div class="l-out"></div></details>`;
+    const btn = el.querySelector('.l-run'), prog = el.querySelector('.l-prog'), out = el.querySelector('.l-out');
+    btn.onclick = async () => {
+      const job = await makeJob();
+      if (!job) return;
+      btn.disabled = true; prog.textContent = 'Starting…'; out.innerHTML = '';
+      const w = new Worker('js/tuner-worker.js');
+      w.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === 'progress') { prog.textContent = `${m.done} of ${m.total}`; return; }
+        w.terminate(); btn.disabled = false; prog.textContent = '';
+        drawLuck(out, m.out);
+      };
+      w.onerror = (e) => { w.terminate(); btn.disabled = false; prog.textContent = 'Something went wrong: ' + (e.message || ''); };
+      w.postMessage({ type: 'luck', n: 300, block: 252, ...job });
+    };
+  }
+  function drawLuck(el, rows) {
+    const q = (a, p) => { const b = [...a].sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(p * b.length))]; };
+    const f = rows.map(r => r.final), h = rows.map(r => r.bhFinal);
+    const beat = rows.filter(r => r.final > r.bhFinal).length / rows.length * 100, safer = rows.filter(r => r.dd < r.bhDD).length / rows.length * 100;
+    el.innerHTML = `<p class="summary-line">In ${rows.length} alternative histories, the robot ended with <b>more money than just holding in ${beat.toFixed(0)}%</b> of them, and had <b>a smaller worst drop in ${safer.toFixed(0)}%</b>.</p>
+      <div class="tiles">
+        <div class="tile"><div class="lab">Typical result</div><div class="val">${fmt.money(q(f, 0.5))}</div><div class="cmp">Just holding: ${fmt.money(q(h, 0.5))}</div></div>
+        <div class="tile"><div class="lab">Bad case (1 in 10)</div><div class="val">${fmt.money(q(f, 0.1))}</div><div class="cmp">Just holding: ${fmt.money(q(h, 0.1))}</div></div>
+        <div class="tile"><div class="lab">Good case (1 in 10)</div><div class="val">${fmt.money(q(f, 0.9))}</div><div class="cmp">Just holding: ${fmt.money(q(h, 0.9))}</div></div>
+        <div class="tile"><div class="lab">Typical worst drop</div><div class="val">${fmt.pctPlain(q(rows.map(r => r.dd), 0.5), 0)}</div><div class="cmp">Just holding: ${fmt.pctPlain(q(rows.map(r => r.bhDD), 0.5), 0)}</div></div>
+      </div>
+      <div class="legend"><span class="li"><i class="sw" style="color:${css('--s1')};height:10px;width:10px;border-radius:50%"></i>Robot</span><span class="li"><i class="sw" style="color:${css('--bench')};height:10px;width:10px;border-radius:50%"></i>Just holding</span><span class="li muted">Each dot is one alternative history · money at the end, log scale</span></div>
+      <canvas class="luck-dots"></canvas>`;
+    const cv = el.querySelector('canvas'), W = cv.parentElement.clientWidth || 600, H = 110, dpr = window.devicePixelRatio || 1;
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.width = '100%'; cv.style.height = H + 'px';
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const all = [...f, ...h].filter(x => x > 0), lo = Math.log(Math.min(...all)), hi = Math.log(Math.max(...all)), X = (v) => 12 + (Math.log(Math.max(v, 1)) - lo) / (hi - lo || 1) * (W - 24);
+    const rowY = { r: 28, h: 64 }, rnd = TL_rand(3);
+    g.globalAlpha = 0.55;
+    for (const v of f) { g.fillStyle = css('--s1'); g.beginPath(); g.arc(X(v), rowY.r + (rnd() - 0.5) * 16, 3, 0, 7); g.fill(); }
+    for (const v of h) { g.fillStyle = css('--bench'); g.beginPath(); g.arc(X(v), rowY.h + (rnd() - 0.5) * 16, 3, 0, 7); g.fill(); }
+    g.globalAlpha = 1; g.strokeStyle = css('--ink'); g.lineWidth = 2;
+    for (const [v, y] of [[q(f, 0.5), rowY.r], [q(h, 0.5), rowY.h]]) { g.beginPath(); g.moveTo(X(v), y - 12); g.lineTo(X(v), y + 12); g.stroke(); }
+    g.fillStyle = css('--muted'); g.font = '11px system-ui, sans-serif'; g.textBaseline = 'top';
+    for (const v of [q(all, 0.02), q(all, 0.5), q(all, 0.98)]) g.fillText(fmt.money(v), Math.min(W - 60, Math.max(0, X(v) - 20)), 90);
+  }
+  function TL_rand(seed) { let a = seed; return () => { a = (a * 16807) % 2147483647; return a / 2147483647; }; }
+
   /* ---------- heatmap ---------- */
   const RAMP = {
     light: ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'],
@@ -454,5 +513,5 @@
     return api;
   }
 
-  window.TLCharts = { Results, heatmap, lineChart, makeChart, restyleAll, fmt, esc, css, SLOTS, T };
+  window.TLCharts = { Results, heatmap, lineChart, makeChart, restyleAll, luckPanel, fmt, esc, css, SLOTS, T };
 })();

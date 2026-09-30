@@ -286,6 +286,7 @@
 
   let W = null; // the running watch
   function log(text, cls = '') {
+    if ((cls === 'buy' || cls === 'sell') && $('ntfyWatch').checked) sendAlert('Live watch', text.replace(/<[^>]+>/g, ''));
     const li = h('li', { class: cls }, h('time', {}, clockTime()), h('span', {}));
     li.lastChild.innerHTML = text;
     $('wLog').prepend(li);
@@ -334,6 +335,8 @@
     if (src === 'finnhub' && !fh) { A.toast('Add your Finnhub key first, in the box above.'); $('fhCard').scrollIntoView({ behavior: 'smooth' }); return; }
     if (src === 'alpaca' && !alp) { A.toast('Connect your Alpaca practice key first, or choose Finnhub for live prices.'); $('alpacaCard').scrollIntoView({ behavior: 'smooth' }); return; }
     if (dest === 'alpaca' && !alp) { A.toast('Sending orders to Alpaca needs your Alpaca practice key.'); $('alpacaCard').scrollIntoView({ behavior: 'smooth' }); return; }
+    const meta = A.metaOf(sym);
+    if (meta && meta.closeOnly) { A.toast('That is a long-history research series with no live prices. Pick a real stock or fund.'); return; }
     stopWatch(true);
     const strat = TL.clone(algo.strat);
     $('wStart').disabled = true;
@@ -601,6 +604,7 @@
   // Check budgets add up, then write the settings for live/bot.json.
   async function botSettingsOut(outEl, copyEl, bots, enabled) {
     if (bots.some(x => !(x.budget > 0))) { A.toast('Every budget needs to be more than zero.'); return; }
+    if (bots.some(x => (x.type === 'portfolio' ? [...x.strategy.assets, x.strategy.safe] : [x.sym]).some(y => /^(USMKT|USMKT2X|USTB)$/.test(y)))) { A.toast('The "since 1926" series are research data and can\'t be traded. Use the real funds (like SPY, SSO, BIL) for the daily bot.'); return; }
     const pfs = bots.filter(x => x.type === 'portfolio');
     if (pfs.length > 1) { A.toast('Use at most one portfolio bot: two portfolios would fight over the same funds.'); return; }
     const pfFunds = pfs.length ? [...pfs[0].strategy.assets, ...(pfs[0].strategy.safe && pfs[0].strategy.safe !== 'cash' ? [pfs[0].strategy.safe] : [])] : [];
@@ -677,9 +681,59 @@
     el.append(h('div', { class: 'btns', style: 'margin:10px 0' }, make, copy), out);
   }
 
+  /* ---------- alerts (ntfy.sh) ---------- */
+  const NKEY = 'tradinglab.ntfy';
+  const ntfyTopic = () => ($('ntfyTopic').value || '').trim();
+  async function sendAlert(title, body) {
+    const t = ntfyTopic();
+    if (!t) return false;
+    try { const r = await fetch('https://ntfy.sh/' + encodeURIComponent(t), { method: 'POST', body, headers: { Title: title } }); return r.ok; } catch (e) { return false; }
+  }
+  function initAlerts() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(NKEY) || '{}'); } catch (e) { /* storage blocked */ }
+    $('ntfyTopic').value = saved.topic || ''; $('ntfyWatch').checked = saved.watch !== false;
+    const status = () => { const p = $('ntfyStatus'); p.className = 'pill ' + (ntfyTopic() ? 'ok' : ''); p.textContent = ntfyTopic() ? 'On' : 'Off'; };
+    const save = () => { try { localStorage.setItem(NKEY, JSON.stringify({ topic: ntfyTopic(), watch: $('ntfyWatch').checked })); } catch (e) { /* storage blocked */ } status(); };
+    $('ntfyTopic').onchange = save; $('ntfyWatch').onchange = save;
+    $('ntfyMake').onclick = () => {
+      const a = new Uint8Array(10); crypto.getRandomValues(a);
+      $('ntfyTopic').value = 'tradinglab-' + [...a].map(x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join('');
+      save(); $('ntfyMsg').textContent = 'Now subscribe to this exact name in the ntfy app, then press Send a test.';
+    };
+    $('ntfyTest').onclick = async () => {
+      if (!ntfyTopic()) { $('ntfyMsg').textContent = 'Make or type a channel name first.'; return; }
+      $('ntfyMsg').textContent = (await sendAlert('Trading Lab', 'Test alert: your robot\'s trades will show up here.')) ? 'Sent. Check the ntfy app.' : "Couldn't reach ntfy.sh. Check your connection and try again.";
+    };
+    status();
+  }
+
+  /* ---------- kill switch ---------- */
+  function initKill() {
+    const btn = $('killBtn');
+    let armed = false, t = 0;
+    btn.onclick = async () => {
+      if (!armed) { armed = true; btn.textContent = 'Press again to confirm'; t = setTimeout(() => { armed = false; btn.textContent = 'Stop everything'; }, 4000); return; }
+      clearTimeout(t); armed = false; btn.textContent = 'Stopping…'; btn.disabled = true;
+      const lines = [];
+      if (W) { stopWatch(); lines.push('Live watch stopped.'); } else lines.push('Live watch was not running.');
+      if (alp) {
+        try { await alp.cancelAllOrders(); await alp.closeAllPositions(); lines.push('Alpaca practice account: every open order cancelled, and a sell order sent for every position.'); setTimeout(refreshAccount, 2500); }
+        catch (e) { lines.push('Alpaca refused: ' + e.message + '. You can also sell from the Alpaca app.'); }
+      } else lines.push('Alpaca isn\'t connected in this browser, so nothing was sold there. Connect it under "Connect accounts" and press again, or sell from the Alpaca app.');
+      const cfg = await fetchRepoJSON('live/bot.json');
+      $('killOut').innerHTML = `<ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><p><b>To pause the daily bot</b>, replace live/bot.json on GitHub with this. It only changes "enabled" to false. The bot runs at about 11am New York time, so do it before then.</p>`;
+      const ta = h('textarea', { class: 'json', readonly: true }); ta.value = JSON.stringify({ ...(cfg || { bots: [] }), enabled: false }, null, 2);
+      const copy = copyButton(ta); copy.classList.remove('hidden');
+      $('killOut').append(ta, h('div', { class: 'btns', style: 'margin-top:8px' }, copy, h('a', { class: 'btn', href: EDIT_URL, target: '_blank', rel: 'noopener' }, 'Open live/bot.json on GitHub ↗')));
+      btn.textContent = 'Stop everything'; btn.disabled = false;
+      sendAlert('Trading Lab', 'Stop everything was pressed. ' + lines.join(' '));
+    };
+  }
+
   /* ---------- boot ---------- */
   function boot() {
-    initKeys(); initFinnhub(); pickDefaultSource(); initWatchBudget();
+    initKeys(); initFinnhub(); pickDefaultSource(); initWatchBudget(); initAlerts(); initKill();
     if (acct.trades.length === 0 && acct.shares === 0 && acct.start !== watchBudget()) { acct = freshAcct(); saveAcct(); }
     $('wSrc').addEventListener('change', () => { $('wSrc').dataset.touched = '1'; });
     fillAlgoSelect(); fillSymSelect();

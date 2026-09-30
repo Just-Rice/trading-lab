@@ -182,6 +182,52 @@ def extend(real, spy, kind, lev, tbill):
     return out, first
 
 
+LONG = {
+    "USMKT": ("US stock market since 1926 (research data)", "market"),
+    "USTB": ("US Treasury bills since 1926 (research data)", "tbill"),
+    "USMKT2X": ("2x US stock market since 1926 (simulated)", "lever"),
+}
+
+
+def long_history(irx):
+    import csv, io, zipfile
+    url = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_daily_CSV.zip"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (trading-lab data updater)"})
+    for attempt in range(4):
+        try:
+            blob = urllib.request.urlopen(req, timeout=90).read(); break
+        except Exception:
+            if attempt == 3: raise
+            time.sleep(5)
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    text = z.read(z.namelist()[0]).decode("latin-1")
+    days, mkt, rf = [], [], []
+    for row in csv.reader(io.StringIO(text)):
+        if len(row) >= 5 and row[0].strip().isdigit() and len(row[0].strip()) == 8:
+            d = datetime.strptime(row[0].strip(), "%Y%m%d").replace(tzinfo=timezone.utc)
+            days.append(int(d.timestamp() // 86400)); mkt.append((float(row[1]) + float(row[4])) / 100); rf.append(float(row[4]) / 100)
+    french_end = days[-1]
+    # continue with SPY daily returns and the ^IRX T-bill rate
+    spy = json.load(open(os.path.join(DATA, "SPY.json")))
+    keys = sorted(irx); j = 0; last = 0.04
+    for k in range(1, len(spy["t"])):
+        t = spy["t"][k]
+        if t <= french_end: continue
+        while j < len(keys) and keys[j] <= t: last = irx[keys[j]]; j += 1
+        days.append(t); mkt.append(spy["c"][k] / spy["c"][k - 1] - 1); rf.append(last / 252)
+    out = []
+    for sym, (name, kind) in LONG.items():
+        c, level = [], 100.0
+        for m, r in zip(mkt, rf):
+            ret = m if kind == "market" else r if kind == "tbill" else 2 * m - r - (SPREAD + LEV_FEE) / 252
+            level *= 1 + ret; c.append(sig(level))
+        with open(os.path.join(DATA, f"{sym}.json"), "w") as f:
+            json.dump({"s": sym, "t": days, "c": c}, f, separators=(",", ":"))
+        out.append({"s": sym, "n": name, "g": "Long history (since 1926)", "from": day_str(days[0]), "to": day_str(days[-1]),
+                    "rows": len(days), "researchUntil": day_str(french_end), "closeOnly": True})
+    return out
+
+
 def day_str(d):
     return datetime.fromtimestamp(d * 86400, tz=timezone.utc).strftime("%Y-%m-%d")
 
@@ -240,6 +286,17 @@ def main():
             print(f"{sym:6} simulated before {day_str(first)}")
     except Exception as e:
         print(f"Simulated history skipped: {e}", file=sys.stderr)
+    # Long history since 1926 from Ken French's data library (US market with dividends, and T-bills),
+    # continued with SPY and ^IRX after French's last day. Close prices only.
+    try:
+        for e in long_history(tbill_rates()):
+            entries = [x for x in entries if x["s"] != e["s"]] + [e]
+            print(f"{e['s']:8} {e['rows']:6} rows  {e['from']} -> {e['to']} (research data until {e['researchUntil']})")
+    except Exception as e:
+        print(f"Long history skipped: {e}", file=sys.stderr)
+        for sym in LONG:
+            if sym in old and os.path.exists(os.path.join(DATA, f"{sym}.json")):
+                entries = [x for x in entries if x["s"] != sym] + [old[sym]]
     manifest = {"updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "tickers": entries}
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=1)

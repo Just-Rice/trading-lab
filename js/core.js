@@ -15,9 +15,10 @@
     return {
       sym: raw.s, name: (meta && meta.n) || raw.s, n,
       t: Int32Array.from(raw.t),
-      open: Float64Array.from(raw.o), high: Float64Array.from(raw.h),
-      low: Float64Array.from(raw.l), close: Float64Array.from(raw.c),
-      volume: Float64Array.from(raw.v),
+      // long-history files only have closes: use them for open, high and low too
+      open: Float64Array.from(raw.o || raw.c), high: Float64Array.from(raw.h || raw.c),
+      low: Float64Array.from(raw.l || raw.c), close: Float64Array.from(raw.c),
+      volume: raw.v ? Float64Array.from(raw.v) : new Float64Array(n),
       _cache: new Map(),
     };
   }
@@ -390,12 +391,43 @@
    * stop and take-profit are checked against each day's low/high and fill at the
    * level (or at the open, if the price gapped straight through it). */
 
+  /* Estimated US capital-gains tax. Gains on things held under a year are short-term, the
+   * rest long-term. Losses offset gains within a year and leftovers carry forward. Tax is
+   * paid at each year end; whatever is still held is taxed at the end as if sold. */
+  function taxBook(rates) {
+    if (!rates) return null;
+    const stR = rates.st / 100, ltR = rates.lt / 100;
+    let st = 0, lt = 0, carry = 0, paid = 0;
+    return {
+      realize(gain, heldDays) { if (heldDays >= 365) lt += gain; else st += gain; },
+      settle() {
+        let a = st, b = lt; st = 0; lt = 0;
+        if (carry < 0) { let u = Math.min(-carry, Math.max(0, a)); a -= u; carry += u; u = Math.min(-carry, Math.max(0, b)); b -= u; carry += u; }
+        if (a < 0 && b > 0) { const u = Math.min(-a, b); a += u; b -= u; }
+        if (b < 0 && a > 0) { const u = Math.min(-b, a); b += u; a -= u; }
+        carry += Math.min(0, a) + Math.min(0, b);
+        const tax = Math.max(0, a) * stR + Math.max(0, b) * ltR;
+        paid += tax;
+        return tax;
+      },
+      get paid() { return paid; },
+    };
+  }
+  const yearOf = (day) => new Date(day * 864e5).getUTCFullYear();
+  // What simply holding leaves after tax if sold at the end.
+  function afterTaxHold(final, capital, years, rates) {
+    if (!rates) return final;
+    const gain = final - capital;
+    return gain > 0 ? final - gain * (years >= 1 ? rates.lt : rates.st) / 100 : final;
+  }
+
   function backtest(s, strat, opt) {
     const from = Math.max(1, opt.from | 0), to = Math.min(s.n - 1, opt.to == null ? s.n - 1 : opt.to);
     const capital = opt.capital || 10000, fee = (opt.fee || 0) / 100, slip = (opt.slip || 0) / 100;
     const buyFn = compileGroup(s, strat, strat.buy), sellFn = compileGroup(s, strat, strat.sell);
     const risk = riskOf(strat), record = opt.record !== false;
     let cash = capital, shares = 0, pos = null, pending = null;
+    const book = taxBook(opt.tax);
     const equity = record ? new Float64Array(to - from + 1) : null;
     const trades = [];
     let peakEq = capital, maxDD = 0, inMarket = 0;
@@ -404,17 +436,24 @@
     const exit = (i, px, why) => {
       const proceeds = shares * px * (1 - fee);
       cash += proceeds;
+      if (book) book.realize(proceeds - pos.basis, s.t[i] - s.t[pos.entryIdx]);
       const t = trades[trades.length - 1];
       t.exitIdx = i; t.exitPrice = px; t.why = why; t.ret = (proceeds / t.cost - 1) * 100;
       shares = 0; pos = null;
     };
 
     for (let i = from; i <= to; i++) {
+      // 0. pay last year's tax (selling a little of the position if cash is short)
+      if (book && i > from && yearOf(s.t[i]) !== yearOf(s.t[i - 1])) {
+        const tax = book.settle();
+        if (tax > cash && shares > 0) { const sell = Math.min(shares, (tax - cash) / (s.open[i] * (1 - slip) * (1 - fee))); cash += sell * s.open[i] * (1 - slip) * (1 - fee); pos.basis *= 1 - sell / shares; shares -= sell; }
+        cash -= tax;
+      }
       // 1. carry out yesterday's decision at today's open
       if (pending === 'buy' && !pos) {
         const px = s.open[i] * (1 + slip), eq = cash, cost = eq * risk.size;
         shares = cost * (1 - fee) / px; cash -= cost;
-        pos = { entryIdx: i, entryPrice: px, peakHigh: px, peakClose: px };
+        pos = { entryIdx: i, entryPrice: px, peakHigh: px, peakClose: px, basis: cost };
         trades.push({ entryIdx: i, entryPrice: px, cost, shares });
       } else if (pending && pending !== 'buy' && pos) {
         exit(i, s.open[i] * (1 - slip), pending.why);
@@ -456,6 +495,7 @@
       exit(to, s.close[to] * (1 - slip), 'still holding');
       trades[trades.length - 1].open = true;
     }
+    if (book) { cash -= book.settle(); if (record) equity[to - from] = cash; }
     const final = cash;
     const years = Math.max(1 / 252, (s.t[to] - s.t[from]) / 365.25);
     const mean = days ? sumR / days : 0, sd = days ? Math.sqrt(Math.max(0, sumR2 / days - mean * mean)) : 0;
@@ -465,7 +505,7 @@
     const grossLoss = trades.reduce((a, t) => a + (t.ret < 0 ? -t.ret : 0), 0);
     const bh = s.close[to] / s.open[from];
     const m = {
-      final, totalReturn: (final / capital - 1) * 100,
+      final, totalReturn: (final / capital - 1) * 100, taxPaid: book ? book.paid : 0,
       cagr: (Math.pow(Math.max(final, 1e-9) / capital, 1 / years) - 1) * 100,
       maxDD: maxDD * 100, sharpe: sd > 0 ? mean / sd * Math.sqrt(252) : 0,
       trades: trades.length, closedTrades: closed.length,
@@ -696,11 +736,29 @@
     const cal = U.cal, from = Math.max(1, opt.from | 0), to = Math.min(cal.n - 1, opt.to == null ? cal.n - 1 : opt.to);
     const capital = opt.capital || 10000, fee = (opt.fee || 0) / 100, slip = (opt.slip || 0) / 100, band = opt.band == null ? 0.02 : opt.band;
     const freq = strat.rebalance || 'monthly', record = opt.record !== false;
-    const hold = {}; let cash = capital;
+    const hold = {}, basis = {}, acq = {}; let cash = capital;
+    const book = taxBook(opt.tax), guard = strat.mode === 'leverage' ? pfNum(strat, strat.guard, 0) : 0, cool = Math.round(pfNum(strat, strat.cool, 0));
+    let guardUntil = -1, guardHits = 0;
     const equity = record ? new Float64Array(to - from + 1) : null, rebal = [];
     let pending = null, peak = capital, maxDD = 0, sumR = 0, sumR2 = 0, prev = capital, days = 0, orders = 0, turnover = 0, invested = 0;
     const price = (sym, i, k) => { const j = U.idx[sym][i]; return j >= 0 ? U.series[sym][k][j] : NaN; };
+    function sellShares(sym, sh, p, i, taxable = true) {
+      const part = basis[sym] * sh / hold[sym], proceeds = sh * p * (1 - fee);
+      if (book && taxable) book.realize(proceeds - part, cal.t[i] - acq[sym]);
+      cash += proceeds; basis[sym] -= part; hold[sym] -= sh;
+      if (hold[sym] < 1e-9) { delete hold[sym]; delete basis[sym]; delete acq[sym]; }
+    }
     for (let i = from; i <= to; i++) {
+      // pay last year's tax, selling a slice of everything if cash is short
+      if (book && i > from && yearOf(cal.t[i]) !== yearOf(cal.t[i - 1])) {
+        const tax = book.settle();
+        if (tax > cash) {
+          let E0 = 0; for (const sym in hold) E0 += hold[sym] * price(sym, i, 'open');
+          const frac = E0 > 0 ? Math.min(1, (tax - cash) / E0 / (1 - fee) / (1 - slip)) : 0;
+          for (const sym of Object.keys(hold)) sellShares(sym, hold[sym] * frac, price(sym, i, 'open') * (1 - slip), i, false);
+        }
+        cash -= tax;
+      }
       if (pending) {
         // value everything at today's open, then trade toward the targets: sells first, then buys
         let E = cash; const val0 = {};
@@ -713,7 +771,7 @@
           if (Math.abs(diff) < band * E && !full) continue;
           if (diff < 0) {
             const p = price(sym, i, 'open') * (1 - slip), sh = Math.min(hold[sym], -diff / price(sym, i, 'open'));
-            cash += sh * p * (1 - fee); hold[sym] -= sh; if (hold[sym] < 1e-9) delete hold[sym];
+            sellShares(sym, sh, p, i);
             orders++; turnover += sh * p;
           } else if (diff > 0) buys.push([sym, diff]);
         }
@@ -721,10 +779,29 @@
         for (const [sym, d] of buys) {
           const spend = d * scale, p = price(sym, i, 'open') * (1 + slip);
           if (!(p > 0) || spend <= 0) continue;
-          hold[sym] = (hold[sym] || 0) + spend * (1 - fee) / p; cash -= spend;
+          const got = spend * (1 - fee) / p, had = hold[sym] || 0;
+          acq[sym] = had ? (acq[sym] * had + cal.t[i] * got) / (had + got) : cal.t[i];
+          basis[sym] = (basis[sym] || 0) + spend;
+          hold[sym] = had + got; cash -= spend;
           orders++; turnover += spend;
         }
         pending = null;
+      }
+      // Crash guard (boost bots): if the base fund falls guard% below yesterday's close during the day,
+      // sell the stock positions at that level (or the open, if it gapped lower) and wait out the cooling-off days.
+      if (guard > 0 && i > 0) {
+        const base = strat.base || 'SPY', lev = strat.lev || 'SSO', levX = strat.levX || 2;
+        const pc = price(base, i - 1, 'close'), lo = price(base, i, 'low'), op = price(base, i, 'open');
+        if ((hold[base] || hold[lev]) && lo <= pc * (1 - guard / 100)) {
+          const ratio = Math.min(op / pc, 1 - guard / 100);
+          for (const sym of [base, lev]) if (hold[sym]) {
+            const beta = sym === lev ? levX : 1, px = price(sym, i - 1, 'close') * (1 + beta * (ratio - 1)) * (1 - slip);
+            turnover += hold[sym] * px; orders++;
+            sellShares(sym, hold[sym], px, i);
+          }
+          guardUntil = i + cool + 1; guardHits++;
+          if (record) rebal.push({ i, weights: { cash: 1 }, info: [], guard: true });
+        }
       }
       let E = cash, risky = 0;
       for (const sym in hold) { const v = hold[sym] * price(sym, i, 'close'); E += v; if (sym !== (strat.safe || 'cash')) risky += v; }
@@ -735,18 +812,26 @@
       if (i > from) { const r = E / prev - 1; sumR += r; sumR2 += r * r; days++; }
       prev = E;
       if (i < to && (i === from || isRebalanceDay(cal, i, freq))) {
-        const t = portfolioTargets(U, strat, i);
+        let t = portfolioTargets(U, strat, i);
+        if (i <= guardUntil) { const sf = t.safe || 'cash'; t = { ...t, weights: { [sf]: 1 } }; }
         pending = t;
         if (record) rebal.push({ i, weights: t.weights, info: t.info });
       }
     }
-    const final = prev, years = Math.max(1 / 252, (cal.t[to] - cal.t[from]) / 365.25);
+    let final = prev;
+    if (book) {
+      // tax on whatever is still held, as if sold at the last close
+      for (const sym of Object.keys(hold)) book.realize(hold[sym] * price(sym, to, 'close') * (1 - fee) - basis[sym], cal.t[to] - acq[sym]);
+      final -= book.settle();
+      if (record) equity[to - from] = final;
+    }
+    const years = Math.max(1 / 252, (cal.t[to] - cal.t[from]) / 365.25);
     const mean = days ? sumR / days : 0, sd = days ? Math.sqrt(Math.max(0, sumR2 / days - mean * mean)) : 0;
     const m = {
       final, totalReturn: (final / capital - 1) * 100, cagr: (Math.pow(Math.max(final, 1e-9) / capital, 1 / years) - 1) * 100,
       maxDD: maxDD * 100, sharpe: sd > 0 ? mean / sd * Math.sqrt(252) : 0, trades: orders, years,
       exposure: invested / (to - from + 1) * 100, turnover: turnover / capital / years * 100,
-      winRate: 0, avgTrade: 0,
+      winRate: 0, avgTrade: 0, taxPaid: book ? book.paid : 0, guardHits,
     };
     m.calmar = m.maxDD > 0 ? m.cagr / m.maxDD : m.cagr;
     return { from, to, equity, rebal, metrics: m, holdings: hold, cash };
@@ -768,9 +853,11 @@
     tv: { label: 'Target volatility (% a year)', v: 21, min: 10, max: 30, step: 1, tune: false },
     volDays: { label: 'Volatility lookback (days)', v: 20, min: 10, max: 60, step: 5, tune: false },
     cap: { label: 'Most boost allowed (x)', v: 2, min: 1, max: 2, step: 0.25, tune: false },
+    guard: { label: 'Crash trigger: one-day fall (%, 0 = off)', v: 0, min: 0, max: 10, step: 1, tune: false },
+    cool: { label: 'Crash trigger: days to wait', v: 0, min: 0, max: 20, step: 5, tune: false },
   }, o);
   const levBase = (o) => pfBase(Object.assign({ mode: 'leverage', assets: ['SPY', 'SSO'], safe: 'BIL', base: 'SPY', lev: 'SSO', levX: 2, rebalance: 'daily', steer: 'trend',
-    boost: { p: 'boost' }, trendDays: { p: 'trendDays' }, band: { p: 'band' }, tv: { p: 'tv' }, volDays: { p: 'volDays' }, cap: { p: 'cap' } }, o));
+    boost: { p: 'boost' }, trendDays: { p: 'trendDays' }, band: { p: 'band' }, tv: { p: 'tv' }, volDays: { p: 'volDays' }, cap: { p: 'cap' }, guard: { p: 'guard' }, cool: { p: 'cool' } }, o));
   const PORTFOLIOS = [
     levBase({ id: 'lev-gentle', name: 'Gentle boost: 1.5x while trending up (researched)', params: levDials(),
       desc: 'Holds 1.5x the S&P 500 (a mix of the S&P 500 fund and a 2x fund) while it is more than 3% above its 150-day average, and T-bills after it falls 3% below. The only research pick that beat holding in both fresh tests: 1950–2000 and 1928–1949. Over 1928–2026 it grew 11.5% a year against 9.6%, with a worst drop of 54% against 84%. It still trailed holding in 2021–2026, and a sudden one-day crash can hit before it switches.' }),
@@ -799,11 +886,63 @@
     pfBase({ id: 'pf-spy', name: 'S&P 500 only', mode: 'fixed', assets: ['SPY'], weights: { SPY: 100 }, desc: 'Just the S&P 500 index fund, for comparison.' }),
   ];
 
+  /* ---------- "how much was luck?" ----------
+   * Alternative histories: keep the real history before the test (so averages warm up the same),
+   * then stitch together random blocks of real days from the test period, in a new order. */
+  function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function blockOrder(from, to, block, rnd) {
+    const order = [];
+    while (order.length < to - from + 1) { const st = from + Math.floor(rnd() * Math.max(1, to - from + 2 - block)); for (let k = 0; k < block && order.length < to - from + 1; k++) order.push(Math.min(to, st + k)); }
+    return order;
+  }
+  // Rebuild one series along a new day order (calendar indices), keeping bars relative to the previous close.
+  function reshape(s, idxMap, from, order) {
+    const raw = { s: s.sym, t: [], o: [], h: [], l: [], c: [], v: [] };
+    const cut = idxMap ? idxMap[from - 1] : from - 1;
+    for (let j = 0; j <= cut; j++) { raw.t.push(s.t[j]); raw.o.push(s.open[j]); raw.h.push(s.high[j]); raw.l.push(s.low[j]); raw.c.push(s.close[j]); raw.v.push(s.volume[j]); }
+    let prev = s.close[cut];
+    order.forEach((ci, k) => {
+      const j = idxMap ? idxMap[ci] : ci, pj = j - 1;
+      const day = idxMap ? null : s.t[from + k];
+      const pc = s.close[pj];
+      raw.t.push(day == null ? 0 : day);
+      raw.o.push(prev * s.open[j] / pc); raw.h.push(prev * s.high[j] / pc); raw.l.push(prev * s.low[j] / pc);
+      const c = prev * s.close[j] / pc; raw.c.push(c); raw.v.push(s.volume[j]); prev = c;
+    });
+    return raw;
+  }
+  function luckStock(s, strat, opt, n, block, seed) {
+    const rnd = rng(seed || 7), out = [];
+    for (let k = 0; k < n; k++) {
+      const alt = makeSeries(reshape(s, null, opt.from, blockOrder(opt.from, opt.to, block, rnd)));
+      const r = backtest(alt, strat, { ...opt, record: false });
+      const bhFinal = afterTaxHold(opt.capital * alt.close[opt.to] / alt.open[opt.from], opt.capital, r.metrics.years, opt.tax);
+      const bhDD = curveStats(buyHoldCurve(alt, opt.from, opt.to, opt.capital), r.metrics.years).maxDD;
+      out.push({ final: r.metrics.final, bhFinal, dd: r.metrics.maxDD, bhDD });
+    }
+    return out;
+  }
+  function luckPortfolio(U, strat, bench, opt, n, block, seed) {
+    const rnd = rng(seed || 7), out = [];
+    for (let k = 0; k < n; k++) {
+      const order = blockOrder(opt.from, opt.to, block, rnd), map = {};
+      for (const sym of U.syms) {
+        const raw = reshape(U.series[sym], U.idx[sym], opt.from, order);
+        for (let q = 0; q < order.length; q++) raw.t[raw.t.length - order.length + q] = U.cal.t[opt.from + q];
+        map[sym] = makeSeries(raw);
+      }
+      const A = alignUniverse(map, U.calSym || 'SPY');
+      const r = backtestPortfolio(A, strat, { ...opt, record: false }), b = backtestPortfolio(A, bench, { ...opt, record: false });
+      out.push({ final: r.metrics.final, bhFinal: b.metrics.final, dd: r.metrics.maxDD, bhDD: b.metrics.maxDD });
+    }
+    return out;
+  }
+
   root.TL = {
     DAY, dayToISO, makeSeries, extendSeries, indexOnOrAfter, indicator,
     IND, CMP, RECIPES, GOALS, blankStrategy, defaultRisk, tunables, withValues, clone, val,
     describeRule, describeOperand, fmtNum, riskOf,
-    backtest, buyHoldCurve, curveStats, score, paramSpace, decide,
+    backtest, buyHoldCurve, curveStats, score, paramSpace, decide, taxBook, afterTaxHold, luckStock, luckPortfolio,
     alignUniverse, portfolioTargets, backtestPortfolio, decidePortfolio, isRebalanceDay, PORTFOLIOS, WARM,
   };
 })(typeof self !== 'undefined' ? self : globalThis);

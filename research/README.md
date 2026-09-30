@@ -78,3 +78,21 @@ Figures are growth per year · worst drop; bold means the robot passed the rule 
 **Why Moderate 2x failed the 1950–2000 exam** (`x5_why.js`): on Black Monday, 19 October 1987, the market fell 17% in a day while the robot was still at 2x, so it lost about 35% before its switch could react.
 
 **What failed.** 3x leverage had drops of 75–89%. More clues collapsed in the Depression, with a 95% drop. Sector rotation and volatility steering alone had bigger drops than holding. No robot beat holding in 2021–2026.
+
+## Round four: the crash trigger (`leverage/x6_guard.js`)
+
+The trigger cuts a boost bot to T-bills when the market falls g% in one day, then waits `cool` days. The long history has no intraday lows, so the test assumes the sale fills 1% worse than the trigger.
+
+- **Design years (2001–2020):** no 6% one-day fall happened while a bot was boosted, so the design years could not choose a setting. Lower settings (3–5%) fired on ordinary rough days and cost money.
+- **1950–2000**, seen once before, so supporting evidence only:
+
+  | Robot | Without the trigger | With a 6% trigger |
+  |---|---|---|
+  | Moderate 2x | 15.4% · 57% | 15.4% · 44% |
+  | Gentle 1.5x | 13.9% · 47% | 14.0% · 36% |
+
+  Figures are growth per year · worst drop. Over August–December 1987, Moderate lost 31% with the trigger and 48% without it.
+- **On the site (SPY intraday lows, 2001–2026)** it cost about 0.3–0.5% a year:
+  - It fired on 6 May 2010, the Flash Crash: a −10% intraday plunge that closed −3%, so it sold near the bottom.
+  - It also fired on 9 March 2020, where it helped.
+- **How often:** a 6%+ one-day fall happened on 35 days between 1926 and 2026, almost all in crises. The trigger ships switched off.

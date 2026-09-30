@@ -8,7 +8,7 @@
   /* ---------- state ---------- */
   const KEY = 'tradinglab.v1';
   const DEFAULTS = {
-    market: { sym: 'SPY', period: 'all', start: '', end: '', capital: 10000, fee: 0.05, slip: 0.05 },
+    market: { sym: 'SPY', period: 'all', start: '', end: '', capital: 10000, fee: 0.05, slip: 0.05, tax: { on: false, st: 24, lt: 15 } },
     auto: { stratId: 'shield', strat: null, goal: 'sharpe', split: 70, budget: 1500, minTrades: 5 },
     edit: { strat: null, sourceId: 'trend' },
     pf: { stratId: 'pf-balanced', strat: null },
@@ -57,7 +57,10 @@
     if (!uniCache.has(key)) {
       const series = await Promise.all(list.map(loadSeries)), map = {};
       list.forEach((x, k) => { map[x] = series[k]; });
-      uniCache.set(key, TL.alignUniverse(map, 'SPY'));
+      // line everything up on the longest history (the 1926 series when it's included)
+      const cal = list.reduce((a, x) => map[x].t[0] < map[a].t[0] ? x : a, 'SPY');
+      const U = TL.alignUniverse(map, cal); U.calSym = cal;
+      uniCache.set(key, U);
     }
     return uniCache.get(key);
   }
@@ -75,17 +78,29 @@
     return r.to - from >= 60 ? { from, to: r.to } : null;
   }
   function pfBenchmarks(U, from, to, capital, fee, slip) {
+    const o = { from, to, capital, fee, slip, tax: taxRates() };
+    // On the 1926 calendar the benchmark is the whole US market, and there is no 60/40 (the bond funds start in 2002).
+    if (U.calSym === 'USMKT') {
+      const mk = { type: 'portfolio', mode: 'fixed', assets: ['USMKT'], weights: { USMKT: 100 }, safe: 'cash', params: {} };
+      return { spy: TL.backtestPortfolio(U, mk, o), sixty: null, label: 'the US market' };
+    }
     const spy = { type: 'portfolio', mode: 'fixed', assets: ['SPY'], weights: { SPY: 100 }, safe: 'cash', params: {} };
     const sixty = { type: 'portfolio', mode: 'fixed', assets: ['SPY', 'IEF'], weights: { SPY: 60, IEF: 40 }, safe: 'cash', params: {} };
-    const o = { from, to, capital, fee, slip };
-    return { spy: TL.backtestPortfolio(U, spy, o), sixty: TL.backtestPortfolio(U, sixty, o) };
+    return { spy: TL.backtestPortfolio(U, spy, o), sixty: TL.backtestPortfolio(U, sixty, o), label: 'the S&P 500' };
   }
+  // Estimated tax rates, when the viewer has switched taxes on.
+  function taxRates() { const t = S.market.tax; return t && t.on ? { st: +t.st || 0, lt: +t.lt || 0 } : null; }
 
+  // Named stretches of history (need a long-history series to reach back that far)
+  const PERIODS = { dep: ['1928-01-01', '1949-12-31'], post: ['1950-01-01', '2000-12-31'], seventies: ['1966-01-01', '1982-12-31'] };
   function rangeFor(s, m = S.market) {
     let from = 0, to = s.n - 1;
     if (m.period === 'custom') {
       if (m.start) from = TL.indexOnOrAfter(s, isoToDay(m.start));
       if (m.end) to = Math.min(s.n - 1, TL.indexOnOrAfter(s, isoToDay(m.end) + 1) - 1);
+    } else if (PERIODS[m.period]) {
+      const [a, b] = PERIODS[m.period];
+      from = TL.indexOnOrAfter(s, isoToDay(a)); to = Math.min(s.n - 1, TL.indexOnOrAfter(s, isoToDay(b) + 1) - 1);
     } else if (m.period !== 'all') {
       from = TL.indexOnOrAfter(s, s.t[to] - Math.round(+m.period * 365.25));
     }
@@ -146,6 +161,8 @@
     sel.value = m.sym; $('mPeriod').value = m.period;
     $('mStart').value = m.start; $('mEnd').value = m.end;
     $('mCapital').value = m.capital; $('mFee').value = m.fee; $('mSlip').value = m.slip;
+    m.tax = Object.assign({ on: false, st: 24, lt: 15 }, m.tax || {});
+    $('mTaxOn').checked = m.tax.on; $('mTaxSt').value = m.tax.st; $('mTaxLt').value = m.tax.lt;
     const showCustom = () => { const c = m.period === 'custom'; $('mStartWrap').classList.toggle('hidden', !c); $('mEndWrap').classList.toggle('hidden', !c); };
     showCustom();
     const onChange = () => {
@@ -154,9 +171,10 @@
       m.start = $('mStart').value; m.end = $('mEnd').value;
       m.capital = Math.max(100, +$('mCapital').value || 10000);
       m.fee = Math.max(0, +$('mFee').value || 0); m.slip = Math.max(0, +$('mSlip').value || 0);
+      m.tax = { on: $('mTaxOn').checked, st: Math.max(0, +$('mTaxSt').value || 0), lt: Math.max(0, +$('mTaxLt').value || 0) };
       showCustom(); persist(); marketChanged();
     };
-    ['mSym', 'mPeriod', 'mStart', 'mEnd', 'mCapital', 'mFee', 'mSlip'].forEach(id => $(id).addEventListener('change', onChange));
+    ['mSym', 'mPeriod', 'mStart', 'mEnd', 'mCapital', 'mFee', 'mSlip', 'mTaxOn', 'mTaxSt', 'mTaxLt'].forEach(id => $(id).addEventListener('change', onChange));
   }
   function marketChanged() {
     autoResult = null; renderExamEmpty();
@@ -170,7 +188,7 @@
     const s = await loadSeries(S.market.sym);
     const r = rangeFor(s);
     if (!r) throw new Error('That period is too short. Pick at least three months of prices.');
-    return { series: s, strat, from: r.from, to: r.to, capital: S.market.capital, fee: S.market.fee, slip: S.market.slip, ...extra };
+    return { series: s, strat, from: r.from, to: r.to, capital: S.market.capital, fee: S.market.fee, slip: S.market.slip, tax: taxRates(), ...extra };
   }
 
   /* ---------- AUTO-TUNE ---------- */
@@ -648,7 +666,7 @@
   tabHooks.portfolio = () => document.dispatchEvent(new CustomEvent('tl-show-portfolio'));
   window.TLApp = {
     S, persist, toast, loadSeries, loadRaw, metaOf, getStrategy, allStrategies, lockForward, lockForwardPortfolio, savePortfolioSetup, confirmBtn,
-    loadUniverse, pfSyms, pfRange, pfBenchmarks, debounce, showTab, get manifest() { return manifest; }, isoToDay,
+    loadUniverse, pfSyms, pfRange, pfBenchmarks, taxRates, debounce, showTab, get manifest() { return manifest; }, isoToDay,
   };
   boot();
 })();

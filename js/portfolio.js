@@ -2,12 +2,12 @@
 (function () {
   'use strict';
   const A = window.TLApp;
-  const { lineChart, fmt, esc, css, SLOTS, T } = window.TLCharts;
+  const { lineChart, luckPanel, fmt, esc, css, SLOTS, T } = window.TLCharts;
   const { h, dialsEditor } = window.TLBuilder;
   const $ = (id) => document.getElementById(id);
   const S = A.S;
 
-  const FUND_GROUPS = ['Index funds', 'International', 'Bonds', 'Gold & commodities', 'Real estate', 'Sector funds'];
+  const FUND_GROUPS = ['Index funds', 'International', 'Bonds', 'Gold & commodities', 'Real estate', 'Sector funds', 'Leveraged funds', 'Long history (since 1926)'];
   const SAFE_CHOICES = [['SHY', 'Short-term bonds (SHY)'], ['BIL', 'Treasury bills (BIL)'], ['IEF', 'Medium-term bonds (IEF)'], ['AGG', 'Total bond market (AGG)'], ['cash', 'Cash (earns nothing)']];
   const MODES = {
     fixed: 'Fixed mix: always holds the same shares of each fund, topped back up every month.',
@@ -163,12 +163,28 @@
     const steer = h('select', {}, h('option', { value: 'trend' }, 'Fixed boost while the trend is up'), h('option', { value: 'vol' }, 'Steer by volatility: more when calm, less when wild'));
     steer.value = st.steer || 'trend';
     steer.onchange = () => { st.steer = steer.value; changed(); renderControls(); };
+    const market = h('select', {}, h('option', { value: 'spy' }, 'S&P 500 funds (2001 to today)'), h('option', { value: 'long' }, 'Whole US market since 1926 (research data)'));
+    market.value = st.base === 'USMKT' ? 'long' : 'spy';
+    market.onchange = () => {
+      if (market.value === 'long') Object.assign(st, { base: 'USMKT', lev: 'USMKT2X', safe: 'USTB', assets: ['USMKT', 'USMKT2X'] });
+      else Object.assign(st, { base: 'SPY', lev: 'SSO', safe: 'BIL', assets: ['SPY', 'SSO'] });
+      changed(); renderControls();
+    };
+    ed.append(h('label', { class: 'fld' }, h('span', {}, 'Test it on'), market),
+      h('p', { class: 'hint' }, market.value === 'long' ? 'Runs on the whole US stock market back to 1926, with a simulated 2x version and T-bills. Use the "Years to test" menu to pick eras like the Great Depression. It only has one price a day, so the crash trigger can only react at the close. The daily bot can\'t trade these: switch back to the S&P 500 funds for live use.' : 'Uses the real S&P 500 fund (SPY), a 2x fund (SSO) and a T-bill fund (BIL).'));
     ed.append(h('p', { class: 'warnline' }, 'Leverage multiplies gains and losses. A sudden one-day crash can hit before the trend switch reacts: on Black Monday 1987 a 2x version lost about 35% in a day.'));
     ed.append(h('label', { class: 'fld' }, h('span', {}, 'How it sizes the boost'), steer));
     if (st.steer === 'vol') {
       ed.append(num('tv', 'Aim for this yearly volatility (%)', 1, 5, 40), num('cap', 'Most boost allowed (x, up to 2)', 0.25, 1, 2), num('volDays', 'Volatility lookback (days)', 5, 5, 120));
     } else ed.append(num('boost', 'Boost: how many times the S&P 500 (1 to 2)', 0.25, 1, 2));
     ed.append(num('trendDays', 'Trend average (days)', 25, 20, 400), num('band', 'Buffer around the average (%)', 1, 0, 10));
+    // Crash trigger
+    const g = TL.val(st, st.guard) || 0;
+    const gOn = h('input', { type: 'checkbox' }); gOn.checked = g > 0;
+    gOn.onchange = () => { setNum(st, 'guard', gOn.checked ? 6 : 0); changed(); renderControls(); };
+    ed.append(h('h3', { class: 'sub' }, 'Crash trigger'), h('label', { class: 'check' }, gOn, 'Sell straight away if the S&P 500 falls sharply during a day'));
+    ed.append(h('p', { class: 'hint' }, 'The trend switch only checks closing prices, so a sudden crash can hit first. The trigger sells the stock positions the moment the price is a set % below the previous close. It helped hugely on Black Monday 1987 and in March 2020, but on 6 May 2010 (the "Flash Crash") it sold at the bottom of a 10% plunge that recovered within minutes. It is off by default because the evidence is mixed.'));
+    if (g > 0) ed.append(num('guard', 'Trigger when it falls this much in a day (%)', 1, 1, 15), num('cool', 'Then wait this many days before boosting again', 5, 0, 60));
     ed.append(h('p', { class: 'hint' }, 'It checks every day. It holds the boost while the S&P 500 is above its average by more than the buffer, and moves to T-bills (BIL) once it falls below by more than the buffer.'));
     const more = h('details', { class: 'fold' }, h('summary', {}, 'Settings the tuner may change'));
     const dials = h('div', { class: 'dials' });
@@ -217,7 +233,7 @@
       const U = await A.loadUniverse(A.pfSyms(st));
       const r = A.pfRange(U, st);
       if (!r) throw new Error('That period is too short for this portfolio. Pick more years, or funds with a longer history.');
-      const opt = { ...r, capital: S.market.capital, fee: S.market.fee, slip: S.market.slip };
+      const opt = { ...r, capital: S.market.capital, fee: S.market.fee, slip: S.market.slip, tax: A.taxRates() };
       const res = TL.backtestPortfolio(U, st, opt);
       const bench = A.pfBenchmarks(U, res.from, res.to, opt.capital, opt.fee, opt.slip);
       current = { U, res, bench, st };
@@ -227,25 +243,28 @@
   const debouncedRefresh = A.debounce(refresh, 300);
 
   function renderResults() {
-    const { U, res, bench, st } = current, m = res.metrics, b = bench.spy.metrics, c6 = bench.sixty.metrics, cap = S.market.capital;
+    const { U, res, bench, st } = current, m = res.metrics, b = bench.spy.metrics, c6 = bench.sixty ? bench.sixty.metrics : null, cap = S.market.capital;
+    const BN = bench.label === 'the US market' ? 'US market' : 'S&amp;P 500';
     const el = $('pResults');
     const splitNote = pfResult ? ' The shaded part of the chart is the exam years.' : '';
     el.innerHTML = `<div class="card results">
       <div class="res-head"><h2>${esc(st.name)}</h2><span class="sub">${fmt.date(U.cal.t[res.from])} – ${fmt.date(U.cal.t[res.to])} · ${m.years.toFixed(1)} years</span></div>
       ${lateStart(st, U, res.from)}${simNote(st)}
-      <p class="summary-line">Over ${m.years.toFixed(0)} years, this portfolio turned ${fmt.money(cap)} into <b class="${m.final >= b.final ? 'up' : 'down'}">${fmt.money(m.final)}</b>. Just holding the S&amp;P 500 would have made ${fmt.money(b.final)}, and a classic 60/40 mix ${fmt.money(c6.final)}. Its worst drop was ${fmt.pctPlain(m.maxDD, 0)} (S&amp;P 500: ${fmt.pctPlain(b.maxDD, 0)}).</p>
+      <p class="summary-line">Over ${m.years.toFixed(0)} years, this portfolio turned ${fmt.money(cap)} into <b class="${m.final >= b.final ? 'up' : 'down'}">${fmt.money(m.final)}</b>. Just holding ${esc(bench.label)} would have made ${fmt.money(b.final)}${c6 ? `, and a classic 60/40 mix ${fmt.money(c6.final)}` : ''}. Its worst drop was ${fmt.pctPlain(m.maxDD, 0)} (${BN}: ${fmt.pctPlain(b.maxDD, 0)}).${S.market.tax && S.market.tax.on ? ` <span class="muted">All figures are after estimated tax.</span>` : ''}</p>
       <div class="tiles main">
-        ${tile('Money at the end', fmt.money(m.final), `S&amp;P 500: ${fmt.money(b.final)}`, m.final >= b.final)}
-        ${tile('Growth per year', fmt.pct(m.cagr), `S&amp;P 500: ${fmt.pct(b.cagr)}`, m.cagr >= b.cagr)}
-        ${tile('Worst drop', fmt.pctPlain(m.maxDD), `S&amp;P 500: ${fmt.pctPlain(b.maxDD)}`, m.maxDD <= b.maxDD)}
+        ${tile('Money at the end', fmt.money(m.final), `${BN}: ${fmt.money(b.final)}`, m.final >= b.final)}
+        ${tile('Growth per year', fmt.pct(m.cagr), `${BN}: ${fmt.pct(b.cagr)}`, m.cagr >= b.cagr)}
+        ${tile('Worst drop', fmt.pctPlain(m.maxDD), `${BN}: ${fmt.pctPlain(b.maxDD)}`, m.maxDD <= b.maxDD)}
       </div>
       <details class="fold more-numbers"><summary>More numbers</summary><div class="tiles">
-        ${tile('Smoothness (Sharpe ratio)', fmt.num(m.sharpe), `S&amp;P 500: ${fmt.num(b.sharpe)} · 60/40: ${fmt.num(c6.sharpe)}`, m.sharpe >= b.sharpe)}
-        ${tile('60/40 mix, per year', fmt.pct(c6.cagr), `Worst drop ${fmt.pctPlain(c6.maxDD)}`, null)}
+        ${tile('Smoothness (Sharpe ratio)', fmt.num(m.sharpe), `${BN}: ${fmt.num(b.sharpe)}${c6 ? ` · 60/40: ${fmt.num(c6.sharpe)}` : ''}`, m.sharpe >= b.sharpe)}
+        ${c6 ? tile('60/40 mix, per year', fmt.pct(c6.cagr), `Worst drop ${fmt.pctPlain(c6.maxDD)}`, null) : ''}
+        ${m.taxPaid ? tile('Estimated tax paid', fmt.money(m.taxPaid), `${BN} (sold at the end): ${fmt.money(b.taxPaid)}`, m.taxPaid <= b.taxPaid) : ''}
         ${tile('Orders placed', String(m.trades), `About ${(m.trades / m.years).toFixed(0)} a year`, null)}
         ${tile('Money traded per year', fmt.pctPlain(m.turnover, 0), 'Of the starting money', null)}
+        ${st.mode === 'leverage' && (TL.val(st, st.guard) || 0) > 0 ? tile('Crash trigger fired', String(m.guardHits), 'Times it sold during a sharp fall', null) : ''}
       </div></details>
-      <div class="chart-label">Your money vs the S&amp;P 500 and a 60/40 mix</div>
+      <div class="chart-label">Your money vs ${c6 ? 'the S&amp;P 500 and a 60/40 mix' : 'the whole US market'}</div>
       <div class="legend" id="pLegend"></div>
       <div class="chart chart-md" id="pChart"></div>
       <div class="chart-label">What it held over time</div>
@@ -255,14 +274,22 @@
       <div class="holdings" id="pNow"></div>
       <p class="hint" id="pNowNote"></p>
       <details class="fold"><summary>Every rebalance</summary><div class="tbl-wrap" id="pLog"></div></details>
+      <div id="pLuck"></div>
       ${splitNote ? `<p class="hint">${splitNote}</p>` : ''}
     </div>`;
     // money chart
     if (chart) chart.dispose();
     chart = lineChart($('pChart'), $('pLegend'));
     const pts = (eq) => Array.from(eq, (v, i) => ({ time: T(U.cal.t[res.from + i]), value: v }));
-    chart.set([{ label: st.name, pts: pts(res.equity), color: '--s1' }, { label: 'S&P 500 only', pts: pts(bench.spy.equity), color: '--bench', dash: true }, { label: '60/40 mix', pts: pts(bench.sixty.equity), color: '--s2' }]);
+    chart.set([{ label: st.name, pts: pts(res.equity), color: '--s1' }, { label: c6 ? 'S&P 500 only' : 'US market only', pts: pts(bench.spy.equity), color: '--bench', dash: true }, ...(c6 ? [{ label: '60/40 mix', pts: pts(bench.sixty.equity), color: '--s2' }] : [])]);
     drawStrip();
+    luckPanel($('pLuck'), async () => {
+      const raws = {}, bsym = U.calSym === 'USMKT' ? 'USMKT' : 'SPY';
+      const need = [...new Set([U.calSym || 'SPY', bsym, ...st.assets, ...(st.safe && st.safe !== 'cash' ? [st.safe] : [])])];
+      for (const sym of need) { const raw = await A.loadRaw(sym); raws[sym] = { s: raw.s, t: raw.t, o: raw.o, h: raw.h, l: raw.l, c: raw.c, v: raw.v }; }
+      return { kind: 'portfolio', raws, calSym: U.calSym || 'SPY', strategy: st, bench: { type: 'portfolio', mode: 'fixed', assets: [bsym], weights: { [bsym]: 100 }, safe: 'cash', params: {} },
+        opt: { from: res.from, to: res.to, capital: S.market.capital, fee: S.market.fee, slip: S.market.slip, tax: A.taxRates() } };
+    });
     // current holdings
     const now = TL.decidePortfolio(U, st).weights;
     const syms = Object.keys(now).filter(x => now[x] > 0.0001).sort((a, c) => now[c] - now[a]);
@@ -374,7 +401,7 @@
     const icon = { pass: '<path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>', meh: '<path d="M12 8v5m0 3.5v.5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>', fail: '<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>' }[cls];
     const vals = (v) => Object.entries(v).map(([k, x]) => `${R.strat.params[k] ? R.strat.params[k].label : k}: ${x}`).join(' · ');
     const row = (l, a, b, f, hi = true) => `<tr><th>${l}</th><td class="${(hi ? a > b : a < b) ? 'up' : 'down'}">${f(a)}</td><td>${f(b)}</td></tr>`;
-    const col = (name, when, m, bm) => `<div class="exam-col"><h3>${name}</h3><div class="when">${when}</div><table class="kv"><thead><tr><th></th><th>Portfolio</th><th>S&amp;P 500</th></tr></thead><tbody>
+    const col = (name, when, m, bm) => `<div class="exam-col"><h3>${name}</h3><div class="when">${when}</div><table class="kv"><thead><tr><th></th><th>Portfolio</th><th>Just holding</th></tr></thead><tbody>
       ${row('Growth per year', m.cagr, bm.cagr, fmt.pct)}${row('Worst drop', m.maxDD, bm.maxDD, (x) => fmt.pctPlain(x), false)}${row('Smoothness (Sharpe)', m.sharpe, bm.sharpe, fmt.num)}</tbody></table></div>`;
     el.innerHTML = `<div class="verdict ${cls}"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><div><b>${title}</b><p>${text}</p></div></div>
       <p class="hint">Settings: <b>${esc(vals(best.values))}</b>${R.sel ? ` (number ${R.sel + 1})` : ' (the best on the learning years)'}.</p>

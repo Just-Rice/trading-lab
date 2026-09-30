@@ -34,6 +34,8 @@
       cancelOrder: (id) => call(PAPER, `/v2/orders/${id}`, { method: 'DELETE' }),
       closePosition: (sym) => call(PAPER, `/v2/positions/${encodeURIComponent(sym)}`, { method: 'DELETE' }),
       submitOrder: (o) => call(PAPER, '/v2/orders', { method: 'POST', body: o }),
+      cancelAllOrders: () => call(PAPER, '/v2/orders', { method: 'DELETE' }),
+      closeAllPositions: () => call(PAPER, '/v2/positions?cancel_orders=true', { method: 'DELETE' }),
       snapshot: (sym) => call(DATA, `/v2/stocks/${encodeURIComponent(sym)}/snapshot?feed=iex`),
       dailyBars: (sym, startISO) => call(DATA, `/v2/stocks/${encodeURIComponent(sym)}/bars?timeframe=1Day&start=${startISO}&adjustment=all&feed=iex&limit=1000`),
     };

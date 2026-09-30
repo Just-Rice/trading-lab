@@ -32,8 +32,23 @@ function tunePortfolio(m) {
     all: results.map(r => ({ values: r.values, score: r.score })), profitableShare: results.filter(r => r.train.totalReturn > 0).length / results.length });
 }
 
+// "How much was luck?": run the robot and just-holding through reshuffled versions of history.
+function luck(m) {
+  const n = m.n, chunk = 25, out = [];
+  if (m.kind === 'stock') {
+    const s = TL.makeSeries(m.raw);
+    for (let k = 0; k < n; k += chunk) { out.push(...TL.luckStock(s, m.strategy, m.opt, Math.min(chunk, n - k), m.block, 1000 + k)); postMessage({ type: 'progress', done: out.length, total: n }); }
+  } else {
+    const map = {}; for (const sym in m.raws) map[sym] = TL.makeSeries(m.raws[sym]);
+    const U = TL.alignUniverse(map, m.calSym); U.calSym = m.calSym;
+    for (let k = 0; k < n; k += 10) { out.push(...TL.luckPortfolio(U, m.strategy, m.bench, m.opt, Math.min(10, n - k), m.block, 1000 + k)); postMessage({ type: 'progress', done: out.length, total: n }); }
+  }
+  postMessage({ type: 'done', out });
+}
+
 onmessage = (e) => {
   const m = e.data;
+  if (m.type === 'luck') return luck(m);
   if (m.type === 'tune-portfolio') return tunePortfolio(m);
   if (m.type !== 'tune') return;
   if (m.key !== seriesKey) { series = TL.makeSeries(m.raw); seriesKey = m.key; }
