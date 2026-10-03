@@ -51,8 +51,10 @@
 
   function setupChart() {
     if (!chart) {
-      chart = makeChart($('gChart'), () => priceS && priceS.applyOptions({ color: css('--ink-2') }));
-      chart.chart.applyOptions({ timeScale: { visible: false }, crosshair: { vertLine: { labelVisible: false } }, handleScroll: false, handleScale: false });
+      // Theme changes reapply the shared chart options, so put the game's own back afterwards.
+      const gameOpts = { timeScale: { visible: false, rightOffset: 8 }, crosshair: { vertLine: { labelVisible: false } }, handleScroll: false, handleScale: false };
+      chart = makeChart($('gChart'), () => { chart.chart.applyOptions(gameOpts); if (priceS) priceS.applyOptions({ color: css('--ink-2') }); });
+      chart.chart.applyOptions(gameOpts);
     }
     if (priceS) chart.chart.removeSeries(priceS);
     priceS = chart.chart.addLineSeries({ color: css('--ink-2'), lineWidth: 2, priceLineVisible: false, lastValueVisible: true });

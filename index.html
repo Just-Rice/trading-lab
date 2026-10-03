@@ -115,8 +115,8 @@
       <summary>Money and costs</summary>
       <div class="more-grid">
         <label class="fld"><span>Starting money $</span><input type="number" id="mCapital" min="100" step="100" value="10000"></label>
-        <label class="fld" title="Commission charged on every buy and every sell"><span>Fee per trade %</span><input type="number" id="mFee" min="0" max="5" step="0.01" value="0.05"></label>
-        <label class="fld" title="How much worse than the quoted price your order fills"><span>Price slippage %</span><input type="number" id="mSlip" min="0" max="5" step="0.01" value="0.05"></label>
+        <label class="fld"><span>Fee per trade %</span><input type="number" id="mFee" min="0" max="5" step="0.01" value="0.05" aria-describedby="mFeeHint"><small class="fld-hint" id="mFeeHint">Commission charged on every buy and every sell</small></label>
+        <label class="fld"><span>Price slippage %</span><input type="number" id="mSlip" min="0" max="5" step="0.01" value="0.05" aria-describedby="mSlipHint"><small class="fld-hint" id="mSlipHint">How much worse than the quoted price your order fills</small></label>
       </div>
       <div class="more-grid tax-row">
         <label class="check"><input type="checkbox" id="mTaxOn"> Include estimated US tax on gains</label>
@@ -296,7 +296,7 @@
       <div class="row3">
         <label class="fld grow"><span>Robot</span><select id="wAlgo"></select></label>
         <label class="fld"><span>Stock or fund</span><select id="wSym"></select></label>
-        <label class="fld" title="The most the robot puts into one purchase. For the pretend account it is also the starting money when you reset it."><span>Budget $</span><input type="number" id="wBudget" min="1" step="100" value="10000"></label>
+        <label class="fld"><span>Budget $</span><input type="number" id="wBudget" min="1" step="100" value="10000" aria-describedby="wBudgetHint"><small class="fld-hint" id="wBudgetHint">The most the robot puts into one purchase. For the pretend account it is also the starting money when you reset it.</small></label>
       </div>
       <details class="fold">
         <summary>Where prices and orders go</summary>

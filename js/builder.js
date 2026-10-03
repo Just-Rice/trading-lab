@@ -116,6 +116,9 @@
     row.append(cmp);
     row.append(operandEditor(st, r.b, onChange, rerender, r.a));
     row.append(h('button', { class: 'x', title: 'Remove this rule', 'aria-label': 'Remove rule', onclick: () => { group.rules.splice(idx, 1); onChange(); rerender(); } }, '×'));
+    // Ingredient help used to live only in hover titles, which touch screens never show.
+    const helps = [...new Set([r.a.k, r.b.k])].map(k => TL.IND[k]).filter(d => d && d.help).map(d => d.label + ': ' + d.help);
+    if (helps.length) row.append(h('p', { class: 'rule-help' }, helps.join(' ')));
     const usesPos = [r.a, r.b].some(o => TL.IND[o.k] && TL.IND[o.k].scale === 'pos');
     if (isBuy && usesPos) row.append(h('p', { class: 'warnline', style: 'flex-basis:100%' }, '⚠ "My position" ingredients only have a value while the robot holds the stock, so this buy rule can never be true.'));
     return row;
@@ -233,7 +236,7 @@
       onChange(); rerender();
     } }, '＋ Add a dial'));
     el.append(h('h2', {}, 'Rules'));
-    el.append(h('p', { class: 'hint' }, 'Checked at every day\'s close. The robot trades at the next morning\'s open. Hover an ingredient for what it means.'));
+    el.append(h('p', { class: 'hint' }, 'Checked at every day\'s close. The robot trades at the next morning\'s open. Each rule says what its ingredients mean underneath.'));
     el.append(groupEditor(st, 'buy', onChange, rerender));
     el.append(groupEditor(st, 'sell', onChange, rerender));
     el.append(h('h2', {}, 'Safety & sizing'));

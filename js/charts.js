@@ -229,7 +229,9 @@
 
     markerObjs(count) {
       const good = css('--good'), bad = css('--bad');
-      return this.data.markers.slice(0, count).map(m => ({ time: m.time, position: m.position, shape: m.shape, text: m.text, color: m.kind === 'buy' ? good : bad }));
+      // "Buy"/"Sell" words pile on top of each other on narrow charts; keep just the arrows there.
+      const roomy = this.res.trades.length <= this.el.pchart.clientWidth / 20;
+      return this.data.markers.slice(0, count).map(m => ({ time: m.time, position: m.position, shape: m.shape, text: roomy ? m.text : '', color: m.kind === 'buy' ? good : bad }));
     }
     setMarkers(count, force) {
       if (!force && count === this.lastMarkerCount) return;
