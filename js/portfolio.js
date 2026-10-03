@@ -67,7 +67,7 @@
     const addGroup = (label, list, note) => {
       const chips = h('div', { class: 'chips' });
       for (const t of list) {
-        const cb = h('input', { type: 'checkbox' });
+        const cb = h('input', { type: 'checkbox', 'aria-label': t.s + ': ' + t.n });
         cb.checked = st.assets.includes(t.s);
         const chip = h('label', { class: 'chip' + (cb.checked ? ' on' : ''), title: t.n }, cb, t.s);
         cb.onchange = () => {
