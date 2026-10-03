@@ -140,8 +140,32 @@
     $('mSymWrap').classList.toggle('hidden', name === 'portfolio');
     if (tabHooks[name]) tabHooks[name]();
     window.scrollTo({ top: 0 });
+    const sel = document.querySelector(`.tabs button[data-tab="${name}"]`);
+    if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  // Arrow keys, Home and End move between tabs; Tab still reaches every tab too.
+  document.querySelector('.tabs').addEventListener('keydown', (e) => {
+    const tabs = [...document.querySelectorAll('.tabs button')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const j = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (j === undefined) return;
+    e.preventDefault();
+    e.stopPropagation(); // keep the game's arrow-key shortcut from also firing
+    const t = tabs[(j + tabs.length) % tabs.length];
+    t.focus();
+    showTab(t.dataset.tab);
+  });
+  // Fade the edge of the tab bar while more tabs are hidden off-screen.
+  const tabBar = document.querySelector('.tabs');
+  const tabFade = () => {
+    tabBar.classList.toggle('more-left', tabBar.scrollLeft > 2);
+    tabBar.classList.toggle('more-right', tabBar.scrollLeft + tabBar.clientWidth < tabBar.scrollWidth - 2);
+  };
+  tabBar.addEventListener('scroll', tabFade, { passive: true });
+  window.addEventListener('resize', tabFade);
+  tabFade();
   document.addEventListener('click', (e) => {
     const go = e.target.closest('[data-go]');
     if (go) { e.preventDefault(); showTab(go.dataset.go); }

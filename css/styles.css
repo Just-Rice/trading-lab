@@ -1,9 +1,10 @@
 :root {
   color-scheme: light;
   --bg: #f4f4f1; --surface: #fcfcfb; --surface-2: #f1f0ec; --surface-3: #e8e7e1;
-  --ink: #0b0b0b; --ink-2: #52514e; --muted: #75736d;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #6c6a64;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11, 11, 11, .12);
   --accent: #2a78d6; --accent-ink: #1c5cab; --accent-soft: #cde2fb;
+  --accent-solid: #2873d0; /* filled buttons: white text needs 4.5:1 */
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
   --bench: #898781;
   --good: #0ca30c; --bad: #d03b3b; --warn: #fab219;
@@ -21,7 +22,7 @@
     --bg: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --surface-3: #2e2e2b;
     --ink: #ffffff; --ink-2: #c3c2b7; --muted: #9a988f;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, .10);
-    --accent: #3987e5; --accent-ink: #86b6ef; --accent-soft: #184f95;
+    --accent: #3987e5; --accent-ink: #86b6ef; --accent-soft: #184f95; --accent-solid: #2873d0;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
     --bench: #898781;
     --good-text: #0ca30c; --bad-text: #e66767; --warn-text: #fab219;
@@ -35,7 +36,7 @@
   --bg: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --surface-3: #2e2e2b;
   --ink: #ffffff; --ink-2: #c3c2b7; --muted: #9a988f;
   --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, .10);
-  --accent: #3987e5; --accent-ink: #86b6ef; --accent-soft: #184f95;
+  --accent: #3987e5; --accent-ink: #86b6ef; --accent-soft: #184f95; --accent-solid: #2873d0;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   --bench: #898781;
   --good-text: #0ca30c; --bad-text: #e66767; --warn-text: #fab219;
@@ -64,6 +65,9 @@ code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background
 .tabs button { flex: none; border: 0; background: transparent; color: var(--ink-2); font: 600 15px/1 var(--sans); padding: 11px 15px; border-radius: 10px; cursor: pointer; }
 .tabs button:hover { background: var(--surface-2); color: var(--ink); }
 .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
+.tabs.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.tabs.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px); mask-image: linear-gradient(to right, transparent, #000 40px); }
+.tabs.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }
 
 main { max-width: 1320px; margin: 0 auto; padding: 6px 16px 60px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin-bottom: 16px; min-width: 0; }
@@ -83,6 +87,8 @@ h3.sub { margin: 18px 0 8px; font-size: 14px; color: var(--ink-2); }
 .fld { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin-bottom: 10px; }
 .market .fld { margin-bottom: 0; }
 .fld > span { font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.fld-hint { font-size: 12px; line-height: 1.35; color: var(--muted); }
+.rule-help { flex-basis: 100%; margin: 2px 2px 0; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
 .fld.grow { flex: 1 1 220px; }
 .fld.sm { width: 128px; }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 9px; padding: 7px 9px; min-width: 0; max-width: 100%; }
@@ -98,7 +104,7 @@ input:disabled, select:disabled { opacity: .6; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 600 14px/1 var(--sans); padding: 9px 13px; border-radius: 10px; border: 1px solid var(--axis); background: var(--surface); color: var(--ink); cursor: pointer; text-decoration: none; white-space: nowrap; }
 .btn:hover { background: var(--surface-2); }
 .btn:disabled { opacity: .5; cursor: default; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary { background: var(--accent-solid); border-color: var(--accent-solid); color: #fff; }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
 .btn.danger { color: var(--bad-text); }
@@ -122,7 +128,7 @@ input:disabled, select:disabled { opacity: .6; }
 .dial-top .dial-name { flex: 1; font-weight: 600; font-size: 13.5px; min-width: 0; }
 .dial-top input.dial-label { flex: 1; font-weight: 600; font-size: 13.5px; padding: 5px 7px; }
 .dial-range { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
-.dial-range label { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--ink-2); font-weight: 600; }
+.dial-range label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-2); font-weight: 600; }
 .dial-range input { padding: 5px 6px; font-size: 13px; }
 .dial.off .dial-range .rng { opacity: .45; }
 .dial-count { font-size: 12px; color: var(--muted); margin-top: 6px; }
@@ -188,10 +194,12 @@ table.data tbody tr.sel { background: color-mix(in srgb, var(--accent) 12%, tran
 .tile .lab { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .tile .val { font: 700 20px/1.2 var(--sans); margin-top: 2px; }
 .tile .cmp { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.tile .cmp .up, .tile .cmp .down { white-space: nowrap; }
 .res-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .res-head h2 { margin: 0; }
 .res-head .sub { color: var(--ink-2); font-size: 13.5px; }
 .chart-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.chart-tools .help-dot { margin-left: -8px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink-2); min-height: 20px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .legend .li { display: inline-flex; align-items: center; gap: 6px; }
 .legend .sw { width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
@@ -236,7 +244,7 @@ details .tbl-wrap { max-height: 360px; overflow: auto; margin-top: 6px; }
 .num.linked select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cg stroke='%233987e5' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M2 4h12M2 8h12M2 12h12'/%3E%3C/g%3E%3Cg fill='%233987e5'%3E%3Ccircle cx='5' cy='4' r='2'/%3E%3Ccircle cx='11' cy='8' r='2'/%3E%3Ccircle cx='7' cy='12' r='2'/%3E%3C/g%3E%3C/svg%3E"); }
 .num.linked { border-color: var(--accent); }
 .num.linked input { color: var(--accent-ink); font-weight: 600; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
-.num .unit { align-self: center; font-size: 11.5px; color: var(--muted); padding: 0 5px 0 0; }
+.num .unit { align-self: center; font-size: 12px; color: var(--muted); padding: 0 5px 0 0; }
 .x { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 5px; border-radius: 6px; margin-left: auto; }
 .x:hover { color: var(--bad-text); background: var(--surface-2); }
 .add { border: 1px dashed var(--axis); background: transparent; color: var(--ink-2); border-radius: 9px; padding: 7px 10px; font: 600 13px var(--sans); cursor: pointer; width: 100%; }
@@ -246,7 +254,9 @@ details .tbl-wrap { max-height: 360px; overflow: auto; margin-top: 6px; }
 .risk-row .rl { display: flex; align-items: center; gap: 8px; }
 .risk-row small { display: block; color: var(--muted); font-size: 12px; }
 .warnline { font-size: 12.5px; color: var(--warn-text); margin: 4px 0 0; }
-.help-dot { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); font-size: 11px; font-weight: 700; cursor: help; }
+.help-dot { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); font-size: 12px; font-weight: 700; cursor: help; position: relative; }
+/* the help text is in title, which touch and keyboard users never see: show it on tap or focus */
+.help-dot:focus::after { content: attr(data-tip); box-sizing: border-box; position: absolute; z-index: 30; left: -8px; top: calc(100% + 6px); width: min(260px, 80vw); padding: 8px 10px; border-radius: 9px; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 400; line-height: 1.4; text-align: left; box-shadow: var(--shadow); }
 
 /* saved + live */
 .save-row td .btns { justify-content: flex-end; flex-wrap: nowrap; }
@@ -313,7 +323,7 @@ textarea.json { width: 100%; min-height: 160px; font: 12.5px/1.45 ui-monospace, 
 
 /* ---- simpler layout ---- */
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.step { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; font-weight: 800; }
+.step { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-solid); color: #fff; font-size: 14px; font-weight: 800; }
 details.fold { border: 1px solid var(--border); border-radius: 12px; padding: 0 12px; margin: 10px 0; background: var(--surface); }
 details.fold > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 0; font-weight: 600; font-size: 15px; color: var(--ink); }
 details.fold > summary::-webkit-details-marker { display: none; }
@@ -375,3 +385,15 @@ details.more-numbers { margin: 4px 0 14px; }
 .btn.danger-solid:hover { filter: brightness(1.08); }
 .game-btns { margin-top: 12px; }
 .game-btns .btn { min-width: 110px; padding: 12px 16px; font-size: 15px; }
+
+/* touch screens: make every control at least 44px tall so it is easy to tap */
+@media (pointer: coarse) {
+  .icon-btn { flex: none; width: 44px; height: 44px; }
+  .tabs button, .btn, .add, select, input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
+  .check { min-height: 44px; }
+  input[type="checkbox"] { flex: none; width: 22px; height: 22px; }
+  .num select { width: 40px; }
+  .x { min-width: 44px; min-height: 44px; }
+  details summary, .more-settings > summary { padding-top: 12px; padding-bottom: 12px; }
+  .help-dot { width: 24px; height: 24px; }
+}

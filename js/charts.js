@@ -76,7 +76,7 @@
             <button class="btn sm ghost r-exit hidden">Show everything</button>
           </div>
           <div class="chart-tools">
-            <label class="check"><input type="checkbox" class="r-log" checked> Log scale <span class="help-dot" title="Log scale shows percentage moves at the same size, so a 10% move in 2003 looks as big as a 10% move in 2025.">?</span></label>
+            <label class="check"><input type="checkbox" class="r-log" checked> Log scale</label><span class="help-dot" tabindex="0" role="note" aria-label="Log scale shows percentage moves at the same size, so a 10% move in 2003 looks as big as a 10% move in 2025." title="Log scale shows percentage moves at the same size, so a 10% move in 2003 looks as big as a 10% move in 2025." data-tip="Log scale shows percentage moves at the same size, so a 10% move in 2003 looks as big as a 10% move in 2025.">?</span>
             <label class="check"><input type="checkbox" class="r-candles"> Candles</label>
           </div>
           <div class="chart-label">The price, with every buy and sell</div>
@@ -229,7 +229,9 @@
 
     markerObjs(count) {
       const good = css('--good'), bad = css('--bad');
-      return this.data.markers.slice(0, count).map(m => ({ time: m.time, position: m.position, shape: m.shape, text: m.text, color: m.kind === 'buy' ? good : bad }));
+      // "Buy"/"Sell" words pile on top of each other on narrow charts; keep just the arrows there.
+      const roomy = this.res.trades.length <= this.el.pchart.clientWidth / 20;
+      return this.data.markers.slice(0, count).map(m => ({ time: m.time, position: m.position, shape: m.shape, text: roomy ? m.text : '', color: m.kind === 'buy' ? good : bad }));
     }
     setMarkers(count, force) {
       if (!force && count === this.lastMarkerCount) return;
