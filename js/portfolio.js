@@ -66,18 +66,22 @@
     const tickers = A.manifest.tickers;
     const addGroup = (label, list, note) => {
       const chips = h('div', { class: 'chips' });
+      // Chips show only tickers; spell out the chosen funds' names, since hover titles never show on touch.
+      const names = h('p', { class: 'chip-names' });
+      const showNames = () => { names.textContent = list.filter(t => st.assets.includes(t.s)).map(t => t.s + ': ' + t.n).join(' · '); names.hidden = !names.textContent; };
       for (const t of list) {
-        const cb = h('input', { type: 'checkbox' });
+        const cb = h('input', { type: 'checkbox', 'aria-label': t.s + ': ' + t.n });
         cb.checked = st.assets.includes(t.s);
         const chip = h('label', { class: 'chip' + (cb.checked ? ' on' : ''), title: t.n }, cb, t.s);
         cb.onchange = () => {
           if (cb.checked) { st.assets.push(t.s); if (st.weights && st.mode !== 'momentum') st.weights[t.s] = st.weights[t.s] || 10; }
           else { st.assets = st.assets.filter(x => x !== t.s); if (st.weights) delete st.weights[t.s]; }
-          chip.classList.toggle('on', cb.checked); changed(); renderWeights();
+          chip.classList.toggle('on', cb.checked); showNames(); changed(); renderWeights();
         };
         chips.append(chip);
       }
-      const g = h('div', { class: 'asset-group' }, h('h4', {}, label), chips);
+      showNames();
+      const g = h('div', { class: 'asset-group' }, h('h4', {}, label), chips, names);
       if (note) g.append(h('p', { class: 'warnline' }, note));
       return g;
     };
