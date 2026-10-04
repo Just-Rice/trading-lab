@@ -369,6 +369,7 @@ details.more-numbers { margin: 4px 0 14px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--axis); background: var(--surface); font-size: 13.5px; cursor: pointer; user-select: none; }
 .chip input { margin: 0; }
+.chip-names { margin: 6px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
 .chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
 .weights { display: grid; gap: 6px; }
 .weight-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; align-items: center; font-size: 14px; }
@@ -390,7 +391,7 @@ details.more-numbers { margin: 4px 0 14px; }
 @media (pointer: coarse) {
   .icon-btn { flex: none; width: 44px; height: 44px; }
   .tabs button, .btn, .add, select, input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
-  .check { min-height: 44px; }
+  .check, .chip { min-height: 44px; }
   input[type="checkbox"] { flex: none; width: 22px; height: 22px; }
   .num select { width: 40px; }
   .x { min-width: 44px; min-height: 44px; }
