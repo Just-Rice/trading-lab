@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-27T01:34:47Z",
+ "updated": "2026-10-28T01:32:38Z",
  "tickers": [
   {
    "s": "SPY",
@@ -225,272 +225,272 @@
    "n": "Utilities sector fund",
    "g": "Sector funds",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "XLB",
    "n": "Materials sector fund",
    "g": "Sector funds",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "AAPL",
    "n": "Apple",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "MSFT",
    "n": "Microsoft",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "NVDA",
    "n": "Nvidia",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "GOOGL",
    "n": "Alphabet (Google)",
    "g": "Tech",
    "from": "2004-08-19",
-   "to": "2026-10-26",
-   "rows": 5582
+   "to": "2026-10-27",
+   "rows": 5583
   },
   {
    "s": "META",
    "n": "Meta (Facebook)",
    "g": "Tech",
    "from": "2012-05-18",
-   "to": "2026-10-26",
-   "rows": 3630
+   "to": "2026-10-27",
+   "rows": 3631
   },
   {
    "s": "AMZN",
    "n": "Amazon",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "TSLA",
    "n": "Tesla",
    "g": "Tech",
    "from": "2010-06-29",
-   "to": "2026-10-26",
-   "rows": 4107
+   "to": "2026-10-27",
+   "rows": 4108
   },
   {
    "s": "NFLX",
    "n": "Netflix",
    "g": "Tech",
    "from": "2002-05-23",
-   "to": "2026-10-26",
-   "rows": 6146
+   "to": "2026-10-27",
+   "rows": 6147
   },
   {
    "s": "AMD",
    "n": "AMD",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "INTC",
    "n": "Intel",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "ORCL",
    "n": "Oracle",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "ADBE",
    "n": "Adobe",
    "g": "Tech",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "CRM",
    "n": "Salesforce",
    "g": "Tech",
    "from": "2004-06-23",
-   "to": "2026-10-26",
-   "rows": 5622
+   "to": "2026-10-27",
+   "rows": 5623
   },
   {
    "s": "PLTR",
    "n": "Palantir",
    "g": "Tech",
    "from": "2020-09-30",
-   "to": "2026-10-26",
-   "rows": 1525
+   "to": "2026-10-27",
+   "rows": 1526
   },
   {
    "s": "BRK-B",
    "n": "Berkshire Hathaway",
    "g": "Finance",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "JPM",
    "n": "JPMorgan Chase",
    "g": "Finance",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "V",
    "n": "Visa",
    "g": "Finance",
    "from": "2008-03-19",
-   "to": "2026-10-26",
-   "rows": 4681
+   "to": "2026-10-27",
+   "rows": 4682
   },
   {
    "s": "GS",
    "n": "Goldman Sachs",
    "g": "Finance",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "JNJ",
    "n": "Johnson & Johnson",
    "g": "Health",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "UNH",
    "n": "UnitedHealth",
    "g": "Health",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "PFE",
    "n": "Pfizer",
    "g": "Health",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "WMT",
    "n": "Walmart",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "COST",
    "n": "Costco",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "KO",
    "n": "Coca-Cola",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "PEP",
    "n": "PepsiCo",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "MCD",
    "n": "McDonald's",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "NKE",
    "n": "Nike",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "DIS",
    "n": "Disney",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "HD",
    "n": "Home Depot",
    "g": "Consumer",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "XOM",
    "n": "ExxonMobil",
    "g": "Industry & energy",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "CAT",
    "n": "Caterpillar",
    "g": "Industry & energy",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "BA",
    "n": "Boeing",
    "g": "Industry & energy",
    "from": "2000-01-03",
-   "to": "2026-10-26",
-   "rows": 6744
+   "to": "2026-10-27",
+   "rows": 6745
   },
   {
    "s": "USMKT",
@@ -499,7 +499,7 @@
    "from": "1926-07-01",
    "to": "2026-10-26",
    "rows": 26356,
-   "researchUntil": "2026-08-31",
+   "researchUntil": "2026-09-30",
    "closeOnly": true
   },
   {
@@ -509,7 +509,7 @@
    "from": "1926-07-01",
    "to": "2026-10-26",
    "rows": 26356,
-   "researchUntil": "2026-08-31",
+   "researchUntil": "2026-09-30",
    "closeOnly": true
   },
   {
@@ -519,7 +519,7 @@
    "from": "1926-07-01",
    "to": "2026-10-26",
    "rows": 26356,
-   "researchUntil": "2026-08-31",
+   "researchUntil": "2026-09-30",
    "closeOnly": true
   }
  ]
