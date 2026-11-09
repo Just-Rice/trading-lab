@@ -113,6 +113,7 @@ async function runPortfolio(bot, c, account, state, add, today) {
     cash -= qty * p.px;
     add({ ...base, action: 'buy', qty, price: p.px, why: `Bring ${p.sym} up to ${((target[p.sym] || 0) * 100).toFixed(0)}% of the portfolio.` });
   }
+  account.cash = cash;   // what the bots after this one have left to spend
   if (guard > 0) {
     // fresh protective stops, based on the latest close
     await new Promise(r => setTimeout(r, 1500));
@@ -168,10 +169,13 @@ async function main() {
       if (d.action === 'buy' && !pos) {
         const snap = await c.snapshot(bot.sym);
         const px = (snap.latestTrade && snap.latestTrade.p) || lastClose;
+        // account.cash is kept current as the run goes, so two bots buying on the
+        // same morning cannot both spend the same dollars.
         const budget = Math.min(budgetFor(bot, equity) * d.risk.size, +account.cash);
         const qty = Math.floor(budget / px);
         if (qty < 1) { add({ ...base, action: 'note', note: `Buy signal, but ${budget.toFixed(2)} dollars is not enough for one share.` }); continue; }
         const o = await TLAlpaca.buy(c, bot.sym, qty, px, d.risk);
+        account.cash = +account.cash - qty * px;
         state[bot.sym] = { entryDay: today, entryPrice: px, peakHigh: px, peakClose: px };
         add({ ...base, action: 'buy', qty, price: px, why: d.buy.map(x => x.text).join(' and '), orderId: o.id });
       } else if (d.action === 'sell' && pos) {
