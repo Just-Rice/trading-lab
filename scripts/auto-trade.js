@@ -147,6 +147,10 @@ async function main() {
   const account = await c.account();
   const equity = +account.equity;
   const today = nyDay();
+  // GitHub often starts a scheduled job hours late, so the workflow asks for several starts a
+  // day. The first one that finds the market open does the day's trading; the rest stop here.
+  // A run started by hand (FORCE_RUN) always goes ahead.
+  if (state.__ranOn === today && process.env.FORCE_RUN !== 'true') { console.log('Already traded today. Nothing to do.'); return; }
 
   for (const bot of cfg.bots) {
     if (bot.type === 'portfolio') {
@@ -193,6 +197,9 @@ async function main() {
     try { await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', body, headers: { Title: 'Trading Lab daily bot', Tags: news.some(e => e.action === 'error') ? 'warning' : 'chart_with_upwards_trend' } }); }
     catch (e) { console.log('Alert failed: ' + e.message); }
   }
+  // A run where something failed (a price download, an order) doesn't use up the day:
+  // the next scheduled start tries again.
+  if (!log.some(e => e.time >= runStart && e.action === 'error')) state.__ranOn = today;
   writeJSON('live/auto-log.json', log.slice(0, 500));
   writeJSON('live/auto-state.json', state);
 }

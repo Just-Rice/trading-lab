@@ -65,7 +65,7 @@ The same engine (`js/core.js`) runs in the page, in the tuner's Web Worker and i
 ## GitHub Actions
 
 - **Update prices and publish** (`.github/workflows/pages.yml`) runs on every push and every weeknight at 22:30 UTC. It refreshes `data/` and deploys the site to GitHub Pages.
-- **Automatic daily bot** (`.github/workflows/auto-trade.yml`) runs weekdays at 15:00 UTC (11am New York in summer, 10am in winter).
+- **Automatic daily bot** (`.github/workflows/auto-trade.yml`) runs once each weekday, soon after the US market opens. GitHub starts scheduled jobs late, sometimes by hours, so the workflow asks for four starts a day (13:53, 14:53, 16:53 and 17:53 UTC); the first one that finds the market open trades and the others do nothing.
   - It needs two repository secrets, `ALPACA_KEY_ID` and `ALPACA_SECRET_KEY`. An optional third, `NTFY_TOPIC`, turns on phone alerts.
   - It does nothing while `live/bot.json` has `"enabled": false`.
 

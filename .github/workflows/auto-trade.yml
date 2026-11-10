@@ -2,7 +2,13 @@ name: Automatic daily bot
 
 on:
   schedule:
-    - cron: "0 15 * * 1-5"   # about 11am New York time in summer, 10am in winter
+    # GitHub starts scheduled jobs late, and latest of all on the hour: the old single
+    # "0 15" start was running 6 to 9 hours late, after the market had closed, when the bot
+    # can do nothing. So ask for several starts, off the hour. The first one to find the
+    # market open trades; the rest see that the day is done and stop (see auto-trade.js).
+    # 13:53 UTC is 9:53am New York in summer; in winter the market is still closed then
+    # and 14:53 is the first that counts.
+    - cron: "53 13,14,16,17 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +31,8 @@ jobs:
           ALPACA_KEY_ID: ${{ secrets.ALPACA_KEY_ID }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          # "Run workflow" by hand trades even if today's scheduled run already has.
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' }}
         run: node scripts/auto-trade.js
       - name: Save what it did
         run: |
